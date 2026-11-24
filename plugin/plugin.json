@@ -1,0 +1,11 @@
+{
+  "name": "mission-control",
+  "displayName": "Mission Control",
+  "description": "Fixed-order instrument cockpit for monitoring active Antigravity conversations, checklists, subagents, and local CLI agents.",
+  "logo": "assets/logo.svg",
+  "suggestedPrompts": [
+    "Open Mission Control",
+    "Summarize which Antigravity threads need attention or have stalled",
+    "Show active Antigravity conversations and local CLI agents"
+  ]
+}

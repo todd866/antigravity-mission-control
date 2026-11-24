@@ -1,0 +1,6 @@
+// Copy this file to ios/Config/Local.xcconfig (gitignored) and fill in your local values.
+DEVELOPMENT_TEAM = YOUR_APPLE_TEAM_ID
+AGY_BUNDLE_ID = com.yourname.agycontrol
+AGY_DEFAULT_SERVER = https:/$()/your-primary-mac.your-tailnet.ts.net:8446
+AGY_FALLBACK_SERVER = https:/$()/your-secondary-mac.your-tailnet.ts.net:8446
+AGY_IOS_DEVICE_ID = YOUR_IPHONE_UDID

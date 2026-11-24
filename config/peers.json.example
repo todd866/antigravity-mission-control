@@ -1,0 +1,10 @@
+{
+  "selfName": "mac-primary",
+  "peers": [
+    {
+      "name": "mac-secondary",
+      "url": "https://mac-secondary.your-tailnet.ts.net:8446",
+      "tokenFile": "~/.local/state/agy-control/token"
+    }
+  ]
+}
