@@ -186,6 +186,47 @@ interface CommanderState {
   messages: CommanderMessage[];
 }
 
+interface ProviderPoolInfo {
+  engine: string;
+  pool: string;
+  remainingPct: number | null;
+  resetAt: string;
+  jobsLeft?: number | null;
+  tokensLeft?: number | null;
+  freshness: string;
+  paused: boolean;
+  available: boolean;
+  recentlyReset: boolean;
+  unavailableReason?: string;
+}
+
+interface ProviderSummary {
+  available: boolean;
+  generatedAt: number;
+  source: string;
+  paused: string[];
+  pools: ProviderPoolInfo[];
+  resetAlerts: Array<{
+    engine: string;
+    pool: string;
+    remainingPct: number | null;
+    resetAt: string;
+    detectedAt: number;
+  }>;
+  codex?: {
+    installed: boolean;
+    available: boolean;
+    paused: boolean;
+    remainingPct: number | null;
+    resetAt: string;
+    freshness: string;
+    recentlyReset: boolean;
+    models: string[];
+    defaultModels?: { sol: string; astra: string };
+    unavailableReason?: string;
+  };
+}
+
 interface BoardSnapshot {
   generatedAt: number;
   sortMode: SortMode;
@@ -204,6 +245,7 @@ interface BoardSnapshot {
   relays?: RelayItem[];
   hosts?: HostInfo[];
   projects?: ProjectInfo[];
+  providers?: ProviderSummary | null;
   host?: string;
   lastAction?: LastActionInfo | null;
   initialFilter?: FilterMode;
@@ -1254,6 +1296,71 @@ function renderCommanderActionCard(act: CommanderAction): string {
   </div>`;
 }
 
+function renderProviderPills(providers?: ProviderSummary | null): string {
+  if (!providers) return '';
+  const grouped = new Map<string, ProviderPoolInfo[]>();
+  for (const p of providers.pools || []) {
+    if (p.paused || p.remainingPct === null) continue;
+    const eng = p.engine.toLowerCase();
+    const arr = grouped.get(eng) || [];
+    arr.push(p);
+    grouped.set(eng, arr);
+  }
+
+  const byEngine = new Map<string, ProviderPoolInfo>();
+  for (const [eng, list] of grouped.entries()) {
+    let chosen: ProviderPoolInfo;
+    if (eng === 'cursor') {
+      chosen = list.reduce((best, cur) => ((cur.remainingPct ?? -1) > (best.remainingPct ?? -1) ? cur : best));
+    } else {
+      const scoped = eng === 'gemini' ? list.filter((p) => p.pool === 'week' || p.pool === '5h') : list;
+      const cand = scoped.length > 0 ? scoped : list;
+      chosen = cand.reduce((low, cur) => ((cur.remainingPct ?? 999) < (low.remainingPct ?? 999) ? cur : low));
+    }
+    byEngine.set(eng, chosen);
+  }
+
+  if (providers.codex?.available && !byEngine.has('codex')) {
+    byEngine.set('codex', {
+      engine: 'codex',
+      pool: 'codex:primary',
+      remainingPct: providers.codex.remainingPct,
+      resetAt: providers.codex.resetAt || '',
+      freshness: providers.codex.freshness || 'unknown',
+      paused: false,
+      available: true,
+      recentlyReset: Boolean(providers.codex.recentlyReset),
+    });
+  }
+  const order = ['codex', 'gemini', 'cursor', 'zai'];
+  const entries = Array.from(byEngine.entries()).sort((a, b) => {
+    const ai = order.indexOf(a[0]);
+    const bi = order.indexOf(b[0]);
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+  });
+  if (entries.length === 0) return '';
+
+  const codexModels = providers.codex?.defaultModels
+    ? `${providers.codex.defaultModels.astra} / ${providers.codex.defaultModels.sol}`
+    : '';
+  const pills = entries.slice(0, 4).map(([eng, pool]) => {
+    const pct = pool.remainingPct === null ? '' : `${Math.round(pool.remainingPct)}%`;
+    const isWarn = pool.remainingPct !== null && pool.remainingPct < 25;
+    const isReset = Boolean(pool.recentlyReset && !isWarn);
+    const cls = isReset ? ' is-reset' : isWarn ? ' is-warn' : '';
+    const allForEng = grouped.get(eng) || [pool];
+    const poolBreakdown = allForEng
+      .map((item) => `${item.pool} ${item.remainingPct !== null ? `${Math.round(item.remainingPct)}%` : 'ok'}`)
+      .join(', ');
+    const extraTip = eng === 'codex' && codexModels ? ` | Models: ${codexModels}` : '';
+    const resetTip = isReset ? ' | Recently reset' : '';
+    const tip = `${eng.toUpperCase()}: ${poolBreakdown}${resetTip}${pool.resetAt ? ` | Resets ${pool.resetAt}` : ''}${extraTip}`;
+    const resetTag = isReset ? '<span class="mc-pool-tag">Reset</span>' : '';
+    return `<div class="mc-pool-pill${cls}" title="${esc(tip)}"><span class="mc-pool-dot"></span><span class="mc-pool-name">${esc(eng)}</span>${pct ? `<span class="num">${esc(pct)}</span>` : ''}${resetTag}</div>`;
+  });
+  return `<div class="mc-ai-pools">${pills.join('')}</div>`;
+}
+
 function renderCommanderPane(snap: BoardSnapshot): string {
   const cmdState: CommanderState = ui.commander || {
     version: 1,
@@ -1278,6 +1385,7 @@ function renderCommanderPane(snap: BoardSnapshot): string {
           })
           .join('')}</div>`
       : '';
+  const poolsHtml = renderProviderPills(snap.providers);
 
   const digest = cmdState.digest;
   const digestStatus = digest?.status || (snap.counts.attention > 0 || pendingRelays > 0 ? 'attention' : 'nominal');
@@ -1392,6 +1500,7 @@ function renderCommanderPane(snap: BoardSnapshot): string {
     <div class="mc-ai-top">
       <div class="mc-ai-summary">
         ${nodesHtml}
+        ${poolsHtml}
         <span class="st-working">${STATE_ICON.working} <strong class="num">${snap.counts.working}</strong></span>
         <span class="st-attention">${STATE_ICON.attention} <strong class="num">${snap.counts.attention}</strong></span>
         <span>${ICON_RELAY} <strong class="num">${pendingRelays}</strong></span>

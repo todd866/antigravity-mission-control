@@ -1316,17 +1316,19 @@ body {
   flex-wrap: wrap;
 }
 
-.mc-ai-nodes {
+.mc-ai-nodes,
+.mc-ai-pools {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.mc-node-card {
+.mc-node-card,
+.mc-pool-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   height: 24px;
   padding: 0 8px;
   border-radius: 5px;
@@ -1336,11 +1338,40 @@ body {
   color: var(--mc-fg-2);
 }
 
-.mc-node-name {
+.mc-node-name,
+.mc-pool-name {
   font-family: var(--mc-mono);
   font-weight: 600;
   text-transform: uppercase;
   color: var(--mc-fg);
+}
+
+.mc-pool-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--mc-unread);
+  flex-shrink: 0;
+}
+
+.mc-pool-pill.is-warn .mc-pool-dot {
+  background: var(--mc-attention);
+}
+
+.mc-pool-pill.is-reset {
+  border-color: var(--mc-unread);
+}
+
+.mc-pool-tag {
+  font-family: var(--mc-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--mc-unread-bg);
+  color: var(--mc-unread);
 }
 
 .mc-ai-summary {

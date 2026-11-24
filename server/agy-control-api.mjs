@@ -39,6 +39,7 @@ import {
   sendCommanderMessage,
   updateCommanderSettings,
 } from '../plugin/src/commander.mjs';
+import { askCodexHelper, getProviderCapacity } from '../plugin/src/providers.mjs';
 
 const HOME = homedir();
 const PORT = Number(process.env.AGY_CONTROL_PORT || 8696);
@@ -155,9 +156,32 @@ const server = createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && url.pathname === '/v1/board') {
       const includeHidden = url.searchParams.get('includeHidden') === '1';
-      const payload = await getFederatedBoard({ includeFleet: true, includeHidden, localOnly });
+      const [payload, providers] = await Promise.all([
+        getFederatedBoard({ includeFleet: true, includeHidden, localOnly }),
+        getProviderCapacity().catch(() => null),
+      ]);
       scheduleLocalBriefings(payload.conversations, payload.host);
-      return sendJson(res, 200, payload);
+      return sendJson(res, 200, providers ? { ...payload, providers } : payload);
+    }
+
+    if (req.method === 'GET' && url.pathname === '/v1/providers') {
+      const force = url.searchParams.get('refresh') === '1';
+      const providers = await getProviderCapacity({ force });
+      return sendJson(res, 200, { ok: true, providers });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/codex/ask') {
+      const body = await readJsonBody(req, 32768);
+      const out = await askCodexHelper({
+        prompt: typeof body.prompt === 'string' ? body.prompt : '',
+        model: typeof body.model === 'string' ? body.model : 'astra',
+        effort: typeof body.effort === 'string' ? body.effort : 'medium',
+        cwd: typeof body.cwd === 'string' ? body.cwd : '',
+        files: Array.isArray(body.files) ? body.files : [],
+        timeoutSec: body.timeoutSec,
+      });
+      audit('codex_ask', { ok: out.ok, model: out.model || '', effort: out.effort || '' });
+      return sendJson(res, out.status || (out.ok ? 200 : 500), out);
     }
 
     const detailMatch = url.pathname.match(/^\/v1\/threads\/([^/]+)$/);

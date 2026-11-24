@@ -17,6 +17,7 @@ import {
 } from './federation.mjs';
 import { approveLocalRelay, dismissLocalRelay, setAutoWake, submitLocalRelay, toggleAutoWake } from './relay.mjs';
 import { getThreadDetail } from './state.mjs';
+import { askCodexHelper, getProviderCapacity } from './providers.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -50,6 +51,7 @@ export const LOW_RISK_ACTIONS = new Set([
   'dismiss_relay',
   'fleet_mail_ack',
   'fleet_snooze',
+  'ask_codex',
 ]);
 
 export const VALID_ACTION_KINDS = new Set([
@@ -413,16 +415,28 @@ async function fetchFleetFallback() {
     || Boolean(slotRes?.stdout)
     || Boolean(mailRes?.stdout);
 
+  const providers = await getProviderCapacity();
+
   return {
     source: hasLocalArtifacts ? 'local-fallback' : 'none',
     counts,
     hosts,
     failingOrWarningRows,
-    pausedProviders,
-    aiPools,
+    pausedProviders: providers.paused.length ? providers.paused : pausedProviders,
+    aiPools: providers.pools.length
+      ? providers.pools.slice(0, 12).map((p) => ({
+          engine: p.engine,
+          name: p.pool,
+          remainingPct: p.remainingPct,
+          resetsAt: p.resetAt,
+          paused: p.paused,
+          recentlyReset: p.recentlyReset,
+        }))
+      : aiPools,
     unreadMailTotal,
     recentMail,
     heavySlotSummary,
+    _providers: providers,
   };
 }
 
@@ -441,6 +455,7 @@ export async function fetchFleetData() {
   const mo = moRes.ok ? moRes.body || {} : {};
   const ml = mlRes.ok ? mlRes.body || {} : {};
   const rows = Array.isArray(mo.rows) ? mo.rows : Array.isArray(ov.security?.rows) ? ov.security.rows : [];
+  const providers = await getProviderCapacity({ fleetCapacity: ov.capacity || null });
 
   return {
     source: 'fleet-api',
@@ -467,14 +482,30 @@ export async function fetchFleetData() {
         status: r.status || '',
         summary: trimCleanBoundary(r.summary || r.title || r.key || '', 180),
       })),
-    pausedProviders: Array.isArray(ov.capacity?.paused) ? ov.capacity.paused : [],
-    aiPools: Array.isArray(ov.capacity?.pools)
-      ? ov.capacity.pools.slice(0, 12).map((p) => ({
-          name: p.label || p.name || '',
-          remainingPct: p.remainingPct ?? null,
-          resetsAt: p.resetsAt || '',
+    pausedProviders: providers.paused.length
+      ? providers.paused
+      : Array.isArray(ov.capacity?.paused)
+        ? ov.capacity.paused
+        : [],
+    aiPools: providers.pools.length
+      ? providers.pools.slice(0, 12).map((p) => ({
+          engine: p.engine,
+          name: p.pool,
+          remainingPct: p.remainingPct,
+          resetsAt: p.resetAt,
+          paused: p.paused,
+          recentlyReset: p.recentlyReset,
         }))
-      : [],
+      : Array.isArray(ov.capacity?.pools)
+        ? ov.capacity.pools.slice(0, 12).map((p) => ({
+            engine: p.engine || '',
+            name: p.pool || p.label || p.name || '',
+            remainingPct: p.remaining_pct ?? p.remainingPct ?? null,
+            resetsAt: p.reset_at ?? p.resetAt ?? '',
+            paused: Boolean(p.paused),
+            recentlyReset: false,
+          }))
+        : [],
     unreadMailTotal: Number(ml.unreadTotal ?? ov.unreadMail ?? 0),
     recentMail: Array.isArray(ml.messages)
       ? ml.messages.slice(0, 6).map((m) => ({
@@ -486,14 +517,41 @@ export async function fetchFleetData() {
         }))
       : [],
     heavySlotSummary: '',
+    _providers: providers,
   };
 }
 
 export async function gatherUnifiedContext() {
-  const [board, fleet] = await Promise.all([
+  const [board, fleetRaw] = await Promise.all([
     getFederatedBoard({ includeFleet: true, includeHidden: false }),
     fetchFleetData(),
   ]);
+  const { _providers, aiPools: _redundantPools, ...fleet } = fleetRaw || {};
+  const providersRaw = _providers || (await getProviderCapacity());
+  const providers = providersRaw
+    ? {
+        source: providersRaw.source,
+        paused: providersRaw.paused,
+        resetAlerts: providersRaw.resetAlerts,
+        codex: providersRaw.codex
+          ? {
+              available: providersRaw.codex.available,
+              remainingPct: providersRaw.codex.remainingPct,
+              resetAt: providersRaw.codex.resetAt,
+              recentlyReset: providersRaw.codex.recentlyReset,
+              defaultModels: providersRaw.codex.defaultModels,
+            }
+          : null,
+        pools: (providersRaw.pools || []).slice(0, 12).map((p) => ({
+          engine: p.engine,
+          pool: p.pool,
+          remainingPct: p.remainingPct,
+          resetAt: p.resetAt,
+          paused: p.paused,
+          recentlyReset: p.recentlyReset,
+        })),
+      }
+    : null;
 
   const conversations = (board.conversations || []).map((c) => ({
     id: c.id,
@@ -534,6 +592,7 @@ export async function gatherUnifiedContext() {
     relays,
     cliAgents: (board.fleet || []).slice(0, 12),
     fleet,
+    providers,
   };
 }
 
@@ -575,6 +634,7 @@ const COMMANDER_CHAT_SCHEMA = JSON.stringify({
               'fleet_snooze',
               'fleet_provider_pause',
               'fleet_morning_refresh',
+              'ask_codex',
             ],
           },
           label: { type: 'string' },
@@ -601,6 +661,10 @@ const COMMANDER_CHAT_SCHEMA = JSON.stringify({
               provider: { type: 'string' },
               paused: { type: 'boolean' },
               label: { type: 'string' },
+              prompt: { type: 'string' },
+              model: { type: 'string' },
+              effort: { type: 'string' },
+              cwd: { type: 'string' },
             },
           },
         },
@@ -831,6 +895,7 @@ function buildChatPrompt({ history, context, userText, inspectedEvidence = [], a
   }));
 
   const hasFleet = Boolean(context.fleet && context.fleet.source && context.fleet.source !== 'none');
+  const codexInfo = context.providers?.codex;
   const actionGuideLines = [
     'Actions catalog:',
     '- send_to_agent: params { conversationId or title, host?, text } (wakes/prompts an Antigravity tab directly)',
@@ -841,6 +906,13 @@ function buildChatPrompt({ history, context, userText, inspectedEvidence = [], a
     '- dismiss_relay: params { relayId, host? }',
     '- toggle_auto_wake: params { conversationId or title, host?, enabled }',
   ];
+  if (codexInfo?.available) {
+    const solSlug = codexInfo.defaultModels?.sol || 'gpt-6.2-sol';
+    const astraSlug = codexInfo.defaultModels?.astra || 'gpt-6.2-astra';
+    actionGuideLines.push(
+      `- ask_codex: params { prompt, model? ("astra" -> ${astraSlug} | "sol" -> ${solSlug}), effort? ("low"|"medium"|"high"), cwd? } (read-only specialist help using Codex pool; ${codexInfo.remainingPct ?? '?'}% remaining)`,
+    );
+  }
   if (hasFleet) {
     actionGuideLines.push(
       '- fleet_mail: params { to (e.g. "mac-primary:project" or "mac-secondary"), text }',
@@ -1164,6 +1236,24 @@ export async function executeActionInternal(action, { editedText = '' } = {}) {
       };
     }
 
+    case 'ask_codex': {
+      const prompt = String(params.prompt || params.text || params.message || '').trim();
+      if (!prompt) return { status: 400, body: { ok: false, error: 'Codex prompt is empty' } };
+      const out = await askCodexHelper({
+        prompt,
+        model: params.model ? String(params.model) : 'astra',
+        effort: params.effort ? String(params.effort) : 'medium',
+        cwd: params.cwd ? String(params.cwd) : '',
+        timeoutSec: 240,
+      });
+      return {
+        status: out.status || (out.ok ? 200 : 500),
+        body: out.ok
+          ? { ok: true, message: trimCleanBoundary(`${out.model}: ${out.reply}`, 1200), codex: out }
+          : { ok: false, error: out.error || 'Codex request failed' },
+      };
+    }
+
     default:
       return { status: 400, body: { ok: false, error: 'Unsupported action kind' } };
   }
@@ -1202,7 +1292,7 @@ export async function sendCommanderMessage({
 
   const context = await gatherUnifiedContext();
   let route = chooseCommanderModel(cleanText, effectiveRouting, { hasDrilldown: false });
-  const timeout1 = route.tier === 'Flash' ? 40 : 65;
+  const timeout1 = route.tier === 'Flash' ? 60 : 85;
 
   const prompt1 = buildChatPrompt({
     history: state.messages,
@@ -1328,7 +1418,8 @@ export async function executeCommanderAction(actionId, { editedText = '', execut
   const res = await executeFn(targetAction, { editedText });
   if (res?.status >= 200 && res?.status < 300 && res?.body?.ok) {
     targetAction.status = 'executed';
-    targetAction.resultMessage = trimCleanBoundary(res.body.message || 'Executed cleanly', 220);
+    const maxLen = targetAction.kind === 'ask_codex' ? 1200 : 220;
+    targetAction.resultMessage = trimCleanBoundary(res.body.message || 'Executed cleanly', maxLen);
     targetAction.executedAt = Date.now();
     const saved = saveCommanderState(state);
     return { status: 200, body: { ok: true, message: targetAction.resultMessage, action: targetAction, state: saved } };
@@ -1377,6 +1468,8 @@ function buildDeterministicDigest(context) {
   const fleetCounts = context.fleet?.counts || {};
   const attention = (context.conversations || []).filter((c) => c.state === 'attention');
   const pendingRelays = (context.relays || []).filter((r) => r.status === 'pending');
+  const resetAlerts = Array.isArray(context.providers?.resetAlerts) ? context.providers.resetAlerts : [];
+  const codexInfo = context.providers?.codex;
   const items = [];
   if (attention.length > 0) {
     items.push(
@@ -1388,6 +1481,22 @@ function buildDeterministicDigest(context) {
   }
   if (pendingRelays.length > 0) {
     items.push(`${pendingRelays.length} agent ${pendingRelays.length === 1 ? 'relay awaits' : 'relays await'} review`);
+  }
+  if (resetAlerts.length > 0) {
+    const codexReset = resetAlerts.find((r) => r.engine === 'codex');
+    if (codexReset && codexInfo?.available) {
+      const pct = codexReset.remainingPct !== null ? `${Math.round(codexReset.remainingPct)}%` : '100%';
+      const sol = codexInfo.defaultModels?.sol || 'gpt-6.2-sol';
+      const astra = codexInfo.defaultModels?.astra || 'gpt-6.2-astra';
+      items.push(`Codex reset ${pct}: ${sol} / ${astra} ready`);
+    } else {
+      items.push(
+        `Pool reset: ${resetAlerts
+          .slice(0, 2)
+          .map((r) => `${r.engine} ${r.remainingPct ?? 100}%`)
+          .join(', ')}`,
+      );
+    }
   }
   if (hasFleet && (Number(fleetCounts.fail || 0) > 0 || Number(fleetCounts.warn || 0) > 0)) {
     items.push(`Fleet: ${fleetCounts.fail || 0} failing, ${fleetCounts.warn || 0} warnings`);

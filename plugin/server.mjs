@@ -34,6 +34,7 @@ import {
   sendCommanderMessage,
   updateCommanderSettings,
 } from './src/commander.mjs';
+import { askCodexHelper, getProviderCapacity } from './src/providers.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const APP_URI = 'ui://mission-control/app.html';
@@ -60,13 +61,21 @@ function formatSummaryText(snap) {
   const { counts, conversations } = snap;
   const hostTag = (snap.hosts?.length || 0) > 1 ? ` · ${snap.hosts.map((h) => h.name).join('+')}` : '';
   const header = `Mission Control (${snap.sortMode}${hostTag}): ${counts.total} open — ${counts.attention} waiting, ${counts.working} working, ${counts.bg} background, ${counts.unread} unread, ${counts.idle} idle`;
+  const resetAlerts = Array.isArray(snap.providers?.resetAlerts) ? snap.providers.resetAlerts : [];
+  const resetLine = resetAlerts.length
+    ? `Pool reset: ${resetAlerts.map((r) => `${r.engine} ${r.remainingPct ?? 100}%`).join(', ')}${
+        snap.providers?.codex?.available
+          ? ` (${snap.providers.codex.defaultModels?.sol || 'gpt-6.2-sol'} / ${snap.providers.codex.defaultModels?.astra || 'gpt-6.2-astra'} via ask_codex)`
+          : ''
+      }`
+    : '';
   const lines = conversations.slice(0, 24).map((c) => {
     const step = c.steps ? ` [${c.steps.done}/${c.steps.total}]` : '';
     const macTag = (snap.hosts?.length || 0) > 1 && c.host ? `[${c.host}] ` : '';
     const detail = c.waitingReason || c.briefing?.headline || (c.focusIsCurrentTurn ? c.focus : '') || c.lastReply || '';
     return `#${c.slot} ${macTag}[${c.state.toUpperCase()}] ${c.title} (${c.projectName})${step}${detail ? ` — ${detail}` : ''}`;
   });
-  return [header, ...lines].join('\n');
+  return [header, ...(resetLine ? [resetLine] : []), ...lines].join('\n');
 }
 
 const server = new McpServer({
@@ -124,11 +133,15 @@ registerAppTool(
     },
   },
   async (args = {}) => {
-    const snap = await getFederatedBoard({
-      includeDetailId: args?.selectedId || null,
-      includeFleet: true,
-      includeHidden: false,
-    });
+    const [rawSnap, providers] = await Promise.all([
+      getFederatedBoard({
+        includeDetailId: args?.selectedId || null,
+        includeFleet: true,
+        includeHidden: false,
+      }),
+      getProviderCapacity().catch(() => null),
+    ]);
+    const snap = providers ? { ...rawSnap, providers } : rawSnap;
     scheduleLocalBriefings(snap.conversations, snap.host);
     const structured = {
       ...snap,
@@ -156,11 +169,15 @@ server.registerTool(
     },
   },
   async (args = {}) => {
-    const snap = await getFederatedBoard({
-      includeDetailId: args?.selectedId || null,
-      includeFleet: args?.includeFleet !== false,
-      includeHidden: false,
-    });
+    const [rawSnap, providers] = await Promise.all([
+      getFederatedBoard({
+        includeDetailId: args?.selectedId || null,
+        includeFleet: args?.includeFleet !== false,
+        includeHidden: false,
+      }),
+      getProviderCapacity().catch(() => null),
+    ]);
+    const snap = providers ? { ...rawSnap, providers } : rawSnap;
     scheduleLocalBriefings(snap.conversations, snap.host);
     return {
       content: [{ type: 'text', text: `${snap.counts.total} conversations` }],
@@ -807,6 +824,66 @@ server.registerTool(
     return {
       content: [{ type: 'text', text: 'Cleared AI Commander chat' }],
       structuredContent: { ok: true, state },
+    };
+  },
+);
+
+server.registerTool(
+  'get_provider_capacity',
+  {
+    title: 'Get AI Provider Capacity & Reset Status',
+    description:
+      'Inspect live AI token pool headroom, recently reset pools (such as Codex reset to 100%), paused providers, and available read-only GPT-6.2 Sol/Astra Codex helper models across Mission Control.',
+    inputSchema: {
+      force: z.boolean().optional(),
+    },
+  },
+  async ({ force = false } = {}) => {
+    const summary = await getProviderCapacity({ force: Boolean(force) });
+    const activeLines = (summary.pools || [])
+      .filter((p) => !p.paused && p.available)
+      .map((p) => {
+        const pct = p.remainingPct !== null ? `${Math.round(p.remainingPct)}%` : 'available';
+        const reset = p.recentlyReset ? ' [RECENTLY RESET]' : '';
+        return `${p.engine}/${p.pool}: ${pct}${reset}${p.resetAt ? ` (resets ${p.resetAt})` : ''}`;
+      });
+    const pausedLine = summary.paused?.length ? `Paused: ${summary.paused.join(', ')}` : 'Paused: none';
+    const codex = summary.codex || {};
+    const codexLine = codex.available
+      ? `Codex ask_codex READY (${codex.remainingPct ?? '?'}% remaining) — models: ${codex.defaultModels?.astra || 'gpt-6.2-astra'} (astra), ${codex.defaultModels?.sol || 'gpt-6.2-sol'} (sol)`
+      : `Codex unavailable: ${codex.unavailableReason || 'not ready'}`;
+    const text = [codexLine, pausedLine, ...activeLines].join('\n');
+    return {
+      content: [{ type: 'text', text }],
+      structuredContent: summary,
+    };
+  },
+);
+
+server.registerTool(
+  'ask_codex',
+  {
+    title: 'Ask Codex (GPT-6.2 Sol / Astra)',
+    description:
+      'Invoke OpenAI Codex read-only via the Codex token pool for code/proof reviews, root-cause debugging, or specialist second opinions using GPT-6.2 Astra or GPT-6.2 Sol. Refuses cleanly when Codex is paused or out of quota.',
+    inputSchema: {
+      prompt: z.string().min(1).max(16000),
+      model: z.string().optional(),
+      effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
+      cwd: z.string().optional(),
+      files: z.array(z.string()).max(20).optional(),
+      timeoutSec: z.number().int().min(15).max(600).optional(),
+    },
+  },
+  async ({ prompt, model = 'astra', effort = 'medium', cwd = '', files = [], timeoutSec = 240 }) => {
+    const out = await askCodexHelper({ prompt, model, effort, cwd, files, timeoutSec });
+    const text = out.ok
+      ? `[${out.model} · ${out.effort}${out.remainingPct !== null && out.remainingPct !== undefined ? ` · ${Math.round(out.remainingPct)}% pool` : ''}]\n${out.reply}`
+      : (out.error || 'Codex request failed');
+    return {
+      content: [{ type: 'text', text }],
+      isError: !out.ok,
+      structuredContent: out,
     };
   },
 );
