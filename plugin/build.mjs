@@ -35,6 +35,21 @@ const html = `<!doctype html>
 </html>
 `;
 
-const outPath = join(distDir, 'app.html');
-writeFileSync(outPath, html, 'utf8');
-console.log(`Built ${outPath} (${Buffer.byteLength(html, 'utf8')} bytes)`);
+const outHtmlPath = join(distDir, 'app.html');
+writeFileSync(outHtmlPath, html, 'utf8');
+console.log(`Built ${outHtmlPath} (${Buffer.byteLength(html, 'utf8')} bytes)`);
+
+const outServerPath = join(distDir, 'server.mjs');
+await build({
+  entryPoints: [join(__dirname, 'server.mjs')],
+  outfile: outServerPath,
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: ['node22'],
+  external: ['node:*'],
+  banner: {
+    js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);',
+  },
+});
+console.log(`Built ${outServerPath}`);

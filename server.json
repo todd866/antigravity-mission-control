@@ -1,0 +1,20 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.todd866/antigravity-mission-control",
+  "description": "Pictorial Mission Control MCP App cockpit, turn-aware AI briefings, adaptive AI Commander, and multi-Mac federation for Antigravity.",
+  "version": "1.2.0",
+  "repository": {
+    "url": "https://github.com/todd866/antigravity-mission-control",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "antigravity-mission-control",
+      "version": "1.2.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

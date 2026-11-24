@@ -205,8 +205,11 @@ function stripMarkdownPreview(raw, maxLen = 180) {
     if (stripped) cleanedLines.push(stripped);
     if (cleanedLines.join(' ').length >= maxLen) break;
   }
-  const joined = cleanedLines.join(' ').replace(/\s+/g, ' ').trim();
-  return joined.length > maxLen ? `${joined.slice(0, maxLen - 1).trimEnd()}…` : joined;
+  const joined = cleanedLines.join(' ').replace(/\s+/g, ' ').replace(/(?:\.\.\.|…)+$/g, '').trim();
+  if (joined.length <= maxLen) return joined;
+  const cut = joined.slice(0, maxLen).trimEnd();
+  const space = cut.lastIndexOf(' ');
+  return (space > Math.floor(maxLen * 0.55) ? cut.slice(0, space) : cut).trimEnd();
 }
 
 /** Clean multi-paragraph planner replies for compact LLM briefing digests without local paths. */
@@ -220,8 +223,12 @@ function cleanPlainDigestText(raw, maxLen = 1000) {
     .replace(/`([^`]+)`/g, '$1')
     .replace(/\r/g, '')
     .replace(/\n{3,}/g, '\n\n')
+    .replace(/(?:\.\.\.|…)+$/g, '')
     .trim();
-  return s.length > maxLen ? `${s.slice(0, maxLen - 1).trimEnd()}…` : s;
+  if (s.length <= maxLen) return s;
+  const cut = s.slice(0, maxLen).trimEnd();
+  const space = cut.lastIndexOf(' ');
+  return (space > Math.floor(maxLen * 0.65) ? cut.slice(0, space) : cut).trimEnd();
 }
 
 function formatStepsSummary(steps) {

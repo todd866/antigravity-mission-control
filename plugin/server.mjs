@@ -25,10 +25,21 @@ import {
   submitLocalRelay,
   toggleAutoWake,
 } from './src/relay.mjs';
+import {
+  clearCommanderChat,
+  dismissCommanderAction,
+  executeCommanderAction,
+  getCommanderState,
+  getExecutiveDigest,
+  sendCommanderMessage,
+  updateCommanderSettings,
+} from './src/commander.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const APP_URI = 'ui://mission-control/app.html';
-const APP_HTML_PATH = join(__dirname, 'dist', 'app.html');
+const APP_HTML_PATH = existsSync(join(__dirname, 'app.html'))
+  ? join(__dirname, 'app.html')
+  : join(__dirname, 'dist', 'app.html');
 
 function readAppHtml() {
   if (!existsSync(APP_HTML_PATH)) {
@@ -663,6 +674,139 @@ server.registerTool(
     return {
       content: [{ type: 'text', text: msg }],
       structuredContent: { ok: true, conversationId, autoWake, message: msg },
+    };
+  },
+);
+
+server.registerTool(
+  'get_commander_state',
+  {
+    title: 'Get AI Commander State',
+    description: 'App-only tool returning AI Commander chat history, preferences, and cached executive digest.',
+    inputSchema: {},
+    _meta: { ui: { visibility: ['app'] } },
+  },
+  async () => {
+    const state = getCommanderState();
+    return {
+      content: [{ type: 'text', text: `${state.messages.length} messages` }],
+      structuredContent: { ok: true, state },
+    };
+  },
+);
+
+server.registerTool(
+  'get_commander_digest',
+  {
+    title: 'Get AI Commander Executive Digest',
+    description: 'App-only tool generating or returning the cached priority digest across Fleet and Antigravity.',
+    inputSchema: {
+      force: z.boolean().optional(),
+    },
+    _meta: { ui: { visibility: ['app'] } },
+  },
+  async ({ force = false } = {}) => {
+    const out = await getExecutiveDigest({ force: Boolean(force) });
+    return {
+      content: [{ type: 'text', text: out.body?.digest?.headline || 'Executive digest ready' }],
+      structuredContent: out.body,
+    };
+  },
+);
+
+server.registerTool(
+  'send_commander_message',
+  {
+    title: 'Send Message to AI Commander',
+    description: 'App-only tool to send a user prompt to the unified AI Commander across Fleet and Antigravity.',
+    inputSchema: {
+      text: z.string().min(1).max(4000),
+      routingMode: z.enum(['auto', 'fast', 'deep']).optional(),
+      directDispatch: z.boolean().optional(),
+    },
+    _meta: { ui: { visibility: ['app'] } },
+  },
+  async ({ text, routingMode, directDispatch }) => {
+    const out = await sendCommanderMessage({ text, routingMode, directDispatch });
+    return {
+      content: [{ type: 'text', text: out.body?.assistantMessage?.text || out.body?.error || 'Commander replied' }],
+      structuredContent: out.body,
+    };
+  },
+);
+
+server.registerTool(
+  'execute_commander_action',
+  {
+    title: 'Execute AI Commander Action',
+    description: 'App-only human confirmation tool to execute a pending Commander action card.',
+    inputSchema: {
+      actionId: z.string(),
+      editedText: z.string().optional(),
+    },
+    _meta: { ui: { visibility: ['app'] } },
+  },
+  async ({ actionId, editedText }) => {
+    const out = await executeCommanderAction(actionId, { editedText });
+    return {
+      content: [{ type: 'text', text: out.body?.message || out.body?.error || 'Executed action' }],
+      structuredContent: out.body,
+    };
+  },
+);
+
+server.registerTool(
+  'dismiss_commander_action',
+  {
+    title: 'Dismiss AI Commander Action',
+    description: 'App-only human action to skip or dismiss a pending Commander action card.',
+    inputSchema: {
+      actionId: z.string(),
+    },
+    _meta: { ui: { visibility: ['app'] } },
+  },
+  async ({ actionId }) => {
+    const out = dismissCommanderAction(actionId);
+    return {
+      content: [{ type: 'text', text: out.body?.message || out.body?.error || 'Skipped action' }],
+      structuredContent: out.body,
+    };
+  },
+);
+
+server.registerTool(
+  'update_commander_settings',
+  {
+    title: 'Update AI Commander Settings',
+    description: 'App-only tool to update Commander routingMode (auto/fast/deep) and directDispatch preference.',
+    inputSchema: {
+      routingMode: z.enum(['auto', 'fast', 'deep']).optional(),
+      directDispatch: z.boolean().optional(),
+    },
+    _meta: { ui: { visibility: ['app'] } },
+  },
+  async ({ routingMode, directDispatch } = {}) => {
+    const state = updateCommanderSettings({ routingMode, directDispatch });
+    return {
+      content: [{ type: 'text', text: 'Updated AI Commander preferences' }],
+      structuredContent: { ok: true, state },
+    };
+  },
+);
+
+server.registerTool(
+  'clear_commander_chat',
+  {
+    title: 'Clear AI Commander Chat',
+    description: 'App-only tool to start a fresh AI Commander conversation.',
+    inputSchema: {},
+    _meta: { ui: { visibility: ['app'] } },
+  },
+  async () => {
+    const state = clearCommanderChat();
+    return {
+      content: [{ type: 'text', text: 'Cleared AI Commander chat' }],
+      structuredContent: { ok: true, state },
     };
   },
 );

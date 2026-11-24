@@ -1,4 +1,5 @@
 .DS_Store
+dist/
 plugin/node_modules/
 plugin/dist/
 ios/build/

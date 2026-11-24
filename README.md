@@ -1,98 +1,166 @@
 # Mission Control for Antigravity
 
-Fixed-order status cockpit, AI project briefings, multi-Mac federation, fast idle-tab controls with **"What's next"** prompt suggestions, CLI instrument view, and native SwiftUI iOS companion for managing [Antigravity](https://antigravity.google.com) sessions from any Mac or iPhone.
+[![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
+[![Antigravity MCP App](https://img.shields.io/badge/Antigravity-MCP%20App-0284c7.svg)](plugin/plugin.json)
+[![Node 22+](https://img.shields.io/badge/Node.js-22%2B-339933.svg)](plugin/package.json)
+[![iOS 18+](https://img.shields.io/badge/iOS-18%2B%20SwiftUI-f59e0b.svg)](ios/)
 
-## Components
+A pictorial instrument cockpit, turn-aware AI project monitor, adaptive **AI Commander**, and multi-Mac federation layer for [Antigravity](https://antigravity.google).
 
-- **Desktop MCP App (`plugin/`)** — Fixed-slot cockpit (`Waiting`, `Working`, `Background`, `Unread`, `Idle`) across connected Macs, one-click **Send to bottom** (`⤓` or `b`) / **Pin** (`p`), inline **`What's next`** pills and action cards (`Send` / `Edit`), inline prompt composer, `+ New` multi-Mac thread launcher, clean Markdown transcript viewer, and fleet CLI agent view.
-- **Turn-Aware Briefings (`plugin/src/state.mjs`, `plugin/src/briefing.mjs`)** — Separates current-turn focus/checklists from prior-turn state and caches plain-English briefings plus 1–3 contextual `nextActions` via `agy -p --model gemini-3.8-flash-low`.
-- **Multi-Mac Peer Federation (`plugin/src/federation.mjs`)** — Aggregates Antigravity boards, projects, and CLI fleet agents across Macs over Tailscale HTTPS while keeping unified fixed slot order and routing `Focus`, `Stop`, `Send`, `Brief`, and `New Conversation` to the owning Mac.
-- **CLI Status Table (`bin/agy-status`)** — Aligned federated terminal readout (`agy-status`, `--local`, `--json`, `--all`).
-- **Mac Companion Daemon (`server/agy-control-api.mjs`)** — Loopback HTTP API (`127.0.0.1:8696` by default, configurable via `AGY_CONTROL_PORT`) protected by Bearer token (`timingSafeEqual`) for tailnet exposure via `tailscale serve`.
-- **Native iOS App (`ios/`)** — SwiftUI companion (`Mission Control`, iOS 18+) with Keychain-backed primary + fallback server failover (`agycontrol://pair?url=...&fallback=...&token=...`), Mac filter chips, trailing **Bottom** swipe action, leading **Next** swipe action, AI briefings, `"What's next"` quick-send/edit cards, and fleet monitor.
+<table>
+  <tr>
+    <td><img src="docs/screenshots/cockpit-dark.png" alt="Mission Control Pictorial Cockpit (Dark)" width="100%"></td>
+    <td><img src="docs/screenshots/cockpit-light.png" alt="Mission Control Pictorial Cockpit (Light)" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Pictorial Cockpit &amp; Inspector (Dark)</b> — proportional state telemetry, segmented step gauges, AI briefings, one-tap next actions</sub></td>
+    <td align="center"><sub><b>Warm Paper Light Theme</b> — auto-follows host theme variables across dark and light</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/commander-dark.png" alt="AI Commander Cockpit" width="100%"></td>
+    <td><img src="docs/screenshots/palette-dark.png" alt="Command Palette" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>AI Commander</b> — adaptive Flash / Carbon / Neon routing, deep inspection, confirmation action cards</sub></td>
+    <td align="center"><sub><b>Keyboard-First Navigation</b> — instant <code>⌘K</code> command palette, <code>/</code> find bar, <code>?</code> keycap HUD</sub></td>
+  </tr>
+</table>
+
+---
+
+## Why Mission Control
+
+| Surface | What It Solves |
+| --- | --- |
+| **Pictorial Cockpit (`plugin/`)** | Fixed-slot thread board (`Waiting`, `Working`, `Background`, `Unread`, `Idle`), SVG progress rings, phase icons, segmented step blocks, inline **Send** pills, and zero ellipsis clipping |
+| **Turn-Aware Briefings (`plugin/src/briefing.mjs`)** | Separates current-turn activity from prior completed work and synthesizes crisp 2–5 word headlines, phase/health flags, and 1-tap first-person `nextActions` via `gemini-3.8-flash-low` |
+| **Adaptive AI Commander (`plugin/src/commander.mjs`)** | Cross-Mac triage chat that automatically routes between `Flash`, `Carbon`, and `Neon`, drills into thread events on demand, and proposes editable confirmation cards (with optional direct dispatch for low/medium actions) |
+| **Guarded Agent Relay (`plugin/src/relay.mjs`, `bin/agy-relay`)** | Cross-tab and cross-Mac messaging with cycle detection, unsent-draft protection, and per-tab Auto-wake toggles |
+| **Multi-Mac Federation (`plugin/src/federation.mjs`)** | Aggregates Antigravity boards and routes `Focus`, `Stop`, `Send`, `Brief`, and `+ New` to whichever Mac owns the thread over Tailscale HTTPS |
+| **Native iPhone Companion (`ios/`)** | SwiftUI iOS 18+ app with Keychain primary + fallback failover (`agycontrol://pair?...`), Mac filter chips, swipe triage, AI briefings, and live Relay control |
+
+<p align="center">
+  <img src="docs/screenshots/architecture.svg" alt="Mission Control Architecture Diagram" width="100%">
+</p>
+
+---
 
 ## Quick Start
 
-### 1. Install the Antigravity Desktop Plugin
+### 1. Install the Antigravity Plugin (Node.js 22+ required for `node:sqlite`)
 
-Requires Node.js 22+ (for `node:sqlite`).
+**From a Release archive** (zero `npm install` required — bundles `dist/server.mjs` and `dist/app.html`):
 
 ```bash
+agy plugin install https://github.com/todd866/antigravity-mission-control/releases/latest/download/mission-control-plugin-v1.2.0.zip
+```
+
+**Or from source:**
+
+```bash
+git clone https://github.com/todd866/antigravity-mission-control.git
+cd antigravity-mission-control
 ./scripts/install-plugin.sh
 ```
 
-Reload MCP servers in Antigravity (or restart Antigravity) and open **Mission Control** from the global toolbar or auxiliary pane.
+Reload MCP servers in Antigravity and open **Mission Control** from the global sidebar or the side-pane **`+`** menu.
 
-Optionally symlink the CLI status table onto your `PATH`:
+<details>
+<summary>Optional: Package a standalone zip &amp; self-hosted marketplace manifest</summary>
+
+```bash
+./scripts/package-plugin.sh
+# Produces dist/mission-control-plugin-v1.2.0.zip + dist/marketplace.json
+# Validates both plugin/ and the zip archive via `agy plugin validate --strict`
+```
+
+</details>
+
+### 2. Optional CLI Tools
 
 ```bash
 ln -sf "$(pwd)/bin/agy-status" ~/.local/bin/agy-status
+ln -sf "$(pwd)/bin/agy-relay"  ~/.local/bin/agy-relay
+
+agy-status          # Aligned federated status table across connected Macs
+agy-status --json   # Machine-readable snapshot
 ```
 
-### 2. Run the Mac Companion API (Tailnet-Only)
+### 3. Companion API & Multi-Mac Federation (Tailnet-Only)
 
-Install the LaunchAgent and generate a 64-hex bearer token at `~/.local/state/agy-control/token`:
+Install the loopback LaunchAgent (`127.0.0.1:8696`, override with `AGY_CONTROL_PORT`) and generate a 64-hex bearer token at `~/.local/state/agy-control/token`:
 
 ```bash
 ./scripts/install-daemon.sh
-# If port 8696 is in use on a secondary Mac, pick another loopback port:
-# AGY_CONTROL_PORT=8698 ./scripts/install-daemon.sh
-```
-
-Expose the loopback service exclusively inside your Tailscale tailnet:
-
-```bash
 tailscale serve --bg --https=8446 http://127.0.0.1:8696
 ```
 
-To allow remote `Focus`, `Stop`, `Send`, and `New Conversation` actions from iPhone or peer Macs, grant **Accessibility** permission to the `node` binary used by the daemon in **System Settings > Privacy & Security > Accessibility**.
+Grant **Accessibility** permission to your `node` binary in **System Settings → Privacy & Security → Accessibility** so remote `Focus`, `Stop`, `Send`, and `+ New` automation can drive Antigravity cleanly.
 
-### 3. Connect Multiple Macs (Optional)
-
-Copy [`config/peers.json.example`](config/peers.json.example) to `~/.config/agy-control/peers.json` (`0600`) on each Mac, copy the shared `~/.local/state/agy-control/token` (`0600`) between them, and list each peer's Tailscale Serve URL:
+To federate multiple Macs, copy [`config/peers.json.example`](config/peers.json.example) to `~/.config/agy-control/peers.json` (`0600`) and share `~/.local/state/agy-control/token` (`0600`) across peers:
 
 ```json
 {
-  "selfName": "mac-primary",
+  "selfName": "studio",
   "peers": [
     {
-      "name": "mac-secondary",
-      "url": "https://mac-secondary.your-tailnet.ts.net:8446",
+      "name": "laptop",
+      "url": "https://laptop.your-tailnet.ts.net:8446",
       "tokenFile": "~/.local/state/agy-control/token"
     }
   ]
 }
 ```
 
-### 4. Build, Test, and Pair the iOS App
+### 4. Build, Test, and Pair the iOS Companion (Optional)
 
 Requires Xcode 16+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
-1. Copy [`ios/Config/Local.xcconfig.example`](ios/Config/Local.xcconfig.example) to `ios/Config/Local.xcconfig` (gitignored) and fill in your Apple Team ID, bundle identifier, primary Tailscale URL, optional fallback Tailscale URL, and iPhone UDID:
+```bash
+cp ios/Config/Local.xcconfig.example ios/Config/Local.xcconfig
+# Fill in your Team ID, bundle ID, Tailscale URLs, and device UDID
 
-   ```bash
-   cp ios/Config/Local.xcconfig.example ios/Config/Local.xcconfig
-   ```
+./bin/agy-control-ios test --destination "platform=iOS Simulator,name=iPhone 16"
+./bin/agy-control-ios install-device
+./bin/agy-control-ios pair-device
+```
 
-2. Run Simulator tests:
+---
 
-   ```bash
-   ./bin/agy-control-ios test --destination "platform=iOS Simulator,name=iPhone 16"
-   ```
+## Keyboard Shortcuts
 
-3. Build, install, and pair onto your iPhone (encodes both `url` and `fallback` when `AGY_FALLBACK_SERVER` is configured):
+Every desktop view works end-to-end without leaving the keyboard:
 
-   ```bash
-   ./bin/agy-control-ios install-device
-   ./bin/agy-control-ios pair-device
-   ```
+| Scope | Key | Action |
+| --- | --- | --- |
+| **Global** | `⌘K` / `Ctrl+K` | Open Command Palette (jump to any thread, view, or command) |
+| **Global** | `/` or `⌘F` | Open inline filter bar with live match count |
+| **Global** | `?` or `⌘/` | Open single-screen Keycap Cheatsheet HUD |
+| **Views** | `⌘1` / `⌘2` / `⌘3` | Switch between Board, AI Commander, and Agent Relays |
+| **Navigate** | `j` / `k` or `↑` / `↓` | Move selection down / up |
+| **Navigate** | `g` / `G` | Jump to top / bottom row |
+| **Thread** | `Enter` | Focus thread in Antigravity |
+| **Thread** | `n` | Focus thread follow-up composer (`Enter` sends) |
+| **Thread** | `1` / `2` | Send 1st / 2nd `"What's next"` AI suggestion (filters when unselected) |
+| **Thread** | `r` / `a` | Refresh AI briefing / Toggle Auto-wake |
+| **Thread** | `p` / `t` / `b` / `x` | Pin / Top / Bottom / Hide row |
+| **Dismiss** | `Esc` | Dismiss top overlay, find bar, draft, or detail inspector |
+
+---
 
 ## Security Model
 
-- `agy-control-api.mjs` binds only to `127.0.0.1` and relies on `tailscale serve` (never public `funnel`) for remote HTTPS inside your tailnet.
-- Every `/v1/*` request requires an `Authorization: Bearer <token>` header validated in constant time (`timingSafeEqual`), and peer forwarding sets `?localOnly=1` to prevent proxy loops.
-- Tokens and peer configs live outside the repository (`~/.local/state/agy-control/token`, `~/.config/agy-control/peers.json`, `0600`), and iOS credentials are stored in the Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`).
-- Before sending a remote prompt or starting a thread, the Mac controller checks whether Antigravity's composer already holds an unsent draft and aborts with HTTP `409` instead of overwriting it.
+- **Zero public exposure:** `agy-control-api.mjs` binds strictly to `127.0.0.1` and relies on `tailscale serve` (never Funnel) for encrypted intra-tailnet HTTPS.
+- **Constant-time bearer auth:** Every `/v1/*` endpoint validates `Authorization: Bearer <token>` with `crypto.timingSafeEqual`. Peer forwarding appends `?localOnly=1` to prevent routing loops.
+- **Draft-preservation guard:** Before dispatching prompts or starting threads, the Mac controller detects unsent text in Antigravity's composer and fails safe with HTTP `409` instead of overwriting user input.
+- **Risk-tiered Commander execution:** Server-side checks pin high-impact operations (`stop_agent` and system controls) to explicit confirmation even when direct dispatch is enabled; proactive AI suggestions never auto-execute.
+- **Credentials stay outside git:** Tokens and peer manifests live in `~/.local/state/agy-control/` (`0600`) and `~/.config/agy-control/`, and iOS stores secrets in the Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`).
+
+---
+
+## Distribution & Roadmap
+
+See [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) for the full multi-channel distribution playbook covering Antigravity standalone `.zip` bundles, self-hosted `marketplace.json`, the Official Antigravity Marketplace, `npm`, the Official MCP Registry (`server.json`), Glama/Smithery/PulseMCP, Homebrew, community catalogs, and iOS distribution.
 
 ## License
 

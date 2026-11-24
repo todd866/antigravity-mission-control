@@ -30,6 +30,15 @@ import {
   submitLocalRelay,
   toggleAutoWake,
 } from '../plugin/src/relay.mjs';
+import {
+  clearCommanderChat,
+  dismissCommanderAction,
+  executeCommanderAction,
+  getCommanderState,
+  getExecutiveDigest,
+  sendCommanderMessage,
+  updateCommanderSettings,
+} from '../plugin/src/commander.mjs';
 
 const HOME = homedir();
 const PORT = Number(process.env.AGY_CONTROL_PORT || 8696);
@@ -540,6 +549,66 @@ const server = createServer(async (req, res) => {
         autoWake,
         message: `${autoWake ? 'Enabled' : 'Disabled'} auto-wake for ${detail.title}`,
       });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/v1/ai/state') {
+      return sendJson(res, 200, { ok: true, state: getCommanderState() });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/v1/ai/digest') {
+      const force = url.searchParams.get('refresh') === '1';
+      const out = await getExecutiveDigest({ force });
+      return sendJson(res, out.status, out.body);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/ai/chat') {
+      const body = await readJsonBody(req);
+      const text = typeof body.text === 'string' ? body.text.trim() : '';
+      const routingMode = typeof body.routingMode === 'string' ? body.routingMode : undefined;
+      const directDispatch = typeof body.directDispatch === 'boolean' ? body.directDispatch : undefined;
+      const out = await sendCommanderMessage({ text, routingMode, directDispatch });
+      if (out.status === 200) {
+        audit('ai_chat', {
+          chars: text.length,
+          tier: out.body?.assistantMessage?.modelTier || '',
+          actions: (out.body?.assistantMessage?.actions || []).length,
+        });
+      }
+      return sendJson(res, out.status, out.body);
+    }
+
+    const aiExecMatch = url.pathname.match(/^\/v1\/ai\/actions\/([^/]+)\/execute$/);
+    if (req.method === 'POST' && aiExecMatch) {
+      const id = decodeURIComponent(aiExecMatch[1]);
+      if (!UUID_RE.test(id)) return sendJson(res, 400, { ok: false, error: 'Invalid action id' });
+      const body = await readJsonBody(req);
+      const editedText = typeof body.editedText === 'string' ? body.editedText : '';
+      const out = await executeCommanderAction(id, { editedText });
+      audit('ai_action_execute', { id, ok: out.status === 200 });
+      return sendJson(res, out.status, out.body);
+    }
+
+    const aiDismissMatch = url.pathname.match(/^\/v1\/ai\/actions\/([^/]+)\/dismiss$/);
+    if (req.method === 'POST' && aiDismissMatch) {
+      const id = decodeURIComponent(aiDismissMatch[1]);
+      if (!UUID_RE.test(id)) return sendJson(res, 400, { ok: false, error: 'Invalid action id' });
+      const out = dismissCommanderAction(id);
+      if (out.status === 200) audit('ai_action_dismiss', { id });
+      return sendJson(res, out.status, out.body);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/ai/settings') {
+      const body = await readJsonBody(req);
+      const routingMode = typeof body.routingMode === 'string' ? body.routingMode : undefined;
+      const directDispatch = typeof body.directDispatch === 'boolean' ? body.directDispatch : undefined;
+      const state = updateCommanderSettings({ routingMode, directDispatch });
+      return sendJson(res, 200, { ok: true, state });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/ai/clear') {
+      const state = clearCommanderChat();
+      audit('ai_clear', {});
+      return sendJson(res, 200, { ok: true, state });
     }
 
     return sendJson(res, 404, { ok: false, error: 'Not found' });

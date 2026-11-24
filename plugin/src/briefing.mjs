@@ -72,6 +72,18 @@ const BRIEF_JSON_SCHEMA = JSON.stringify({
     currentWork: { type: 'string' },
     priorCompleted: { type: 'string' },
     needsUser: { type: 'string' },
+    phase: {
+      type: 'string',
+      enum: ['plan', 'build', 'test', 'debug', 'review', 'deploy', 'research', 'wait', 'done'],
+    },
+    health: {
+      type: 'string',
+      enum: ['nominal', 'caution', 'blocked', 'ready'],
+    },
+    bullets: {
+      type: 'array',
+      items: { type: 'string' },
+    },
     nextActions: {
       type: 'array',
       items: {
@@ -84,13 +96,44 @@ const BRIEF_JSON_SCHEMA = JSON.stringify({
       },
     },
   },
-  required: ['headline', 'brief', 'currentWork', 'priorCompleted', 'needsUser', 'nextActions'],
+  required: ['headline', 'brief', 'currentWork', 'priorCompleted', 'needsUser', 'phase', 'health', 'bullets', 'nextActions'],
 });
 
-/** Clean accidental markdown links, local paths, or placeholder "None" strings. */
-function cleanPlainText(raw, maxLen = 420) {
+const VALID_PHASES = new Set(['plan', 'build', 'test', 'debug', 'review', 'deploy', 'research', 'wait', 'done']);
+const VALID_HEALTH = new Set(['nominal', 'caution', 'blocked', 'ready']);
+
+function inferPhase(raw, state) {
+  const val = String(raw || '').trim().toLowerCase();
+  if (VALID_PHASES.has(val)) return val;
+  if (state === 'attention') return 'wait';
+  if (state === 'working') return 'build';
+  if (state === 'bg') return 'test';
+  return 'done';
+}
+
+function inferHealth(raw, state) {
+  const val = String(raw || '').trim().toLowerCase();
+  if (VALID_HEALTH.has(val)) return val;
+  if (state === 'attention') return 'blocked';
+  if (state === 'working' || state === 'bg') return 'nominal';
+  return 'ready';
+}
+
+/** Trim at a word boundary without appending "..." or "…". */
+function trimCleanBoundary(text, maxLen) {
+  const clean = text.replace(/\u2026/g, '').replace(/\.{3,}/g, '').trimEnd();
+  if (clean.length <= maxLen) return clean;
+  const cut = clean.slice(0, maxLen).trimEnd();
+  const space = cut.lastIndexOf(' ');
+  return (space > Math.floor(maxLen * 0.55) ? cut.slice(0, space) : cut).trimEnd();
+}
+
+/** Clean accidental markdown links, local paths, ellipsis, or placeholder "None" strings. */
+function cleanPlainText(raw, maxLen = 220) {
   if (typeof raw !== 'string') return '';
-  let text = raw
+  const text = raw
+    .replace(/\u2026/g, '')
+    .replace(/\.{3,}/g, '')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/file:\/\/\/\S+/g, '')
     .replace(/\/Users\/[^\s),.;:]+/g, '')
@@ -101,10 +144,19 @@ function cleanPlainText(raw, maxLen = 420) {
     .replace(/\s+/g, ' ')
     .trim();
   if (/^(none|n\/a|null|nothing)$/i.test(text)) return '';
-  if (text.length > maxLen) {
-    text = `${text.slice(0, maxLen - 1).trimEnd()}…`;
+  return trimCleanBoundary(text, maxLen);
+}
+
+function cleanBullets(rawList) {
+  if (!Array.isArray(rawList)) return [];
+  const out = [];
+  for (const item of rawList) {
+    const clean = cleanPlainText(typeof item === 'string' ? item : String(item || ''), 84);
+    if (!clean) continue;
+    out.push(clean);
+    if (out.length >= 3) break;
   }
-  return text;
+  return out;
 }
 
 function cleanNextActions(rawList, state) {
@@ -114,11 +166,11 @@ function cleanNextActions(rawList, state) {
   const out = [];
   for (const item of rawList) {
     if (!item || typeof item !== 'object') continue;
-    const label = cleanPlainText(item.label, 48);
-    const prompt = cleanPlainText(item.prompt, 260);
+    const label = cleanPlainText(item.label, 36);
+    const prompt = cleanPlainText(item.prompt, 240);
     if (!label || !prompt) continue;
     out.push({ label, prompt });
-    if (out.length >= 3) break;
+    if (out.length >= 2) break;
   }
   return out;
 }
@@ -129,7 +181,7 @@ export function computeBriefingFingerprint(item) {
   const stepCount = Number(item.stepCount || 0);
   const stepKey = stateKey === 'done' ? stepCount : Math.floor(stepCount / 6);
   const waitFlag = item.waitingReason ? item.waitingReason.slice(0, 60) : '';
-  return `v3:${Number(item.lastUserInputMs || 0)}:${stateKey}:${stepKey}:${waitFlag}`;
+  return `v4:${Number(item.lastUserInputMs || 0)}:${stateKey}:${stepKey}:${waitFlag}`;
 }
 
 /** Attach cached AI briefings synchronously without mutating disk or spawning processes. */
@@ -144,11 +196,14 @@ export function attachBriefings(items) {
     return {
       ...item,
       briefing: {
-        headline: cleanPlainText(entry.headline, 140),
-        brief: cleanPlainText(entry.brief, 560),
-        currentWork: cleanPlainText(entry.currentWork, 280),
-        priorCompleted: cleanPlainText(entry.priorCompleted, 280),
-        needsUser: cleanPlainText(entry.needsUser, 220),
+        headline: cleanPlainText(entry.headline, 56),
+        brief: cleanPlainText(entry.brief, 220),
+        currentWork: cleanPlainText(entry.currentWork, 180),
+        priorCompleted: cleanPlainText(entry.priorCompleted, 180),
+        needsUser: cleanPlainText(entry.needsUser, 140),
+        phase: inferPhase(entry.phase, item.state),
+        health: inferHealth(entry.health, item.state),
+        bullets: cleanBullets(entry.bullets),
         nextActions: cleanNextActions(entry.nextActions, item.state),
         updatedAt: Number(entry.updatedAt || 0),
         model: String(entry.model || BRIEF_MODEL),
@@ -196,9 +251,16 @@ function buildBriefingPrompt(digest) {
   };
 
   return [
-    'CRITICAL: DO NOT CALL ANY TOOLS. Never read files, run commands, search, or invoke MCP tools. Answer directly from the JSON below with ONE raw JSON object only:',
-    '{"headline":"...","brief":"...","currentWork":"...","priorCompleted":"...","needsUser":"...","nextActions":[{"label":"...","prompt":"..."}]}',
-    'Rules: Plain English only (no paths, URLs, markdown, acronyms, UUIDs). If Working, nextActions must be [] and currentWork describes active work while priorCompleted holds prior finished work (never claim current turn is done because previousTurn finished). If Idle, Unread, Waiting, or Background (main turn finished and composer is ready), ALWAYS return 2-3 concrete nextActions written in natural first-person user voice ready to send verbatim (label: 2-5 words, prompt: 1-2 direct sentences to keep the work moving). Empty string "" for unused fields.',
+    'CRITICAL: DO NOT CALL ANY TOOLS. Never read files, run commands, search, or invoke MCP tools. Return ONE raw JSON object only:',
+    '{"headline":"","brief":"","currentWork":"","priorCompleted":"","needsUser":"","phase":"build","health":"nominal","bullets":[""],"nextActions":[{"label":"","prompt":""}]}',
+    'Rules: Plain English only. NEVER emit "..." or "…" anywhere. No file paths, URLs, markdown, or UUIDs.',
+    '- headline: 2-5 ultra-crisp signal words (max 42 chars, zero full sentences).',
+    '- brief: 1 crisp sentence (max 150 chars).',
+    '- bullets: 1-3 ultra-short signal phrases (<= 8 words each).',
+    '- phase: plan | build | test | debug | review | deploy | research | wait | done.',
+    '- health: nominal | caution | blocked | ready.',
+    '- If Working: nextActions must be [] and currentWork describes active work while priorCompleted holds prior finished work.',
+    '- If not Working: ALWAYS return 1-2 crisp nextActions in natural first-person user voice (label: 2-3 words, prompt: 1-2 direct sentences). Empty string "" for unused text fields.',
     `Thread JSON: ${JSON.stringify(payload)}`,
   ].join('\n');
 }
@@ -240,7 +302,7 @@ function runAgyPrompt(prompt, timeoutMs = 35000) {
       [
         '-p', prompt,
         '--model', BRIEF_MODEL,
-        '--effort', 'low',
+        ...(/-(?:low|medium|high|xhigh|max)$/.test(BRIEF_MODEL) ? [] : ['--effort', 'low']),
         '--disable-slash-commands',
         '--json-schema', BRIEF_JSON_SCHEMA,
         '--print-timeout', '30s',
@@ -345,11 +407,14 @@ async function generateAndStoreBriefing(conversationId, getDigestFn, timeoutMs =
 
   const entry = {
     fingerprint: fp,
-    headline: cleanPlainText(parsed.headline, 140) || cleanPlainText(digest.title, 100),
-    brief: cleanPlainText(parsed.brief, 560),
-    currentWork: cleanPlainText(parsed.currentWork, 280),
-    priorCompleted: cleanPlainText(parsed.priorCompleted, 280),
-    needsUser: cleanPlainText(parsed.needsUser || digest.waitingReason, 220),
+    headline: cleanPlainText(parsed.headline, 56) || cleanPlainText(digest.title, 56),
+    brief: cleanPlainText(parsed.brief, 220),
+    currentWork: cleanPlainText(parsed.currentWork, 180),
+    priorCompleted: cleanPlainText(parsed.priorCompleted, 180),
+    needsUser: cleanPlainText(parsed.needsUser || digest.waitingReason, 140),
+    phase: inferPhase(parsed.phase, digest.state),
+    health: inferHealth(parsed.health, digest.state),
+    bullets: cleanBullets(parsed.bullets),
     nextActions: cleanNextActions(rawNext, digest.state),
     updatedAt: Date.now(),
     model: BRIEF_MODEL,
