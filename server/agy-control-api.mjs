@@ -343,6 +343,7 @@ const server = createServer(async (req, res) => {
 });
 
 function refreshBriefingsTick() {
+  checkAccessibility().catch(() => {});
   try {
     const snap = getBoardSnapshot({ includeFleet: false, includeHidden: false });
     scheduleBriefingRefresh(snap.conversations, getConversationDigest);

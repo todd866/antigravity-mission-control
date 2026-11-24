@@ -29,8 +29,9 @@ function discoverAgentDesktop() {
 }
 
 const AGENT_DESKTOP = discoverAgentDesktop();
-const AX_HELP_MSG =
-  `Grant Accessibility to node (${process.execPath}) in System Settings > Privacy & Security > Accessibility to allow remote Focus, Stop, and Send.`;
+const AX_HELP_MSG = process.env.AGY_HELPER_APP
+  ? `Grant Accessibility to ${process.env.AGY_HELPER_APP} in System Settings > Privacy & Security > Accessibility to allow remote Focus, Stop, and Send.`
+  : `Grant Accessibility to node (${process.execPath}) in System Settings > Privacy & Security > Accessibility to allow remote Focus, Stop, and Send.`;
 
 let macAccessibilityOk = true;
 
