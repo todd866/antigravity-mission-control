@@ -107,6 +107,13 @@ struct BoardView: View {
             } else {
                 let showHosts = (model.board?.hosts?.count ?? 0) > 1
                 List {
+                    if !model.pendingRelays.isEmpty {
+                        Section("Pending Agent Relays") {
+                            ForEach(model.pendingRelays) { relay in
+                                PendingRelayBoardRow(model: model, relay: relay, showHost: showHosts)
+                            }
+                        }
+                    }
                     ForEach(rows) { row in
                         NavigationLink(value: row) {
                             ConversationInstrumentRow(row: row, showHost: showHosts)
@@ -312,6 +319,13 @@ private struct ConversationInstrumentRow: View {
                         .accessibilityLabel("Pinned")
                 }
 
+                if row.autoWake == true {
+                    Image(systemName: "bolt.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                        .accessibilityLabel("Auto-wake enabled")
+                }
+
                 Text(row.title)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
@@ -380,5 +394,56 @@ private struct ConversationInstrumentRow: View {
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+private struct PendingRelayBoardRow: View {
+    @Bindable var model: AgyAppModel
+    let relay: RelayItem
+    var showHost: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrowshape.turn.up.right.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                Text("\(relay.fromLabel) → \(relay.targetTitle)")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                if showHost && !relay.targetHost.isEmpty {
+                    Text(relay.targetHost.uppercased())
+                        .font(.caption2.weight(.semibold).monospaced())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 3, style: .continuous))
+                }
+            }
+
+            Text(relay.message)
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .lineLimit(3)
+
+            Text(relay.reason)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                Button("Approve & Send") {
+                    Task { _ = await model.approveRelay(relay) }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+
+                Button("Dismiss") {
+                    Task { await model.dismissRelay(relay) }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .padding(.vertical, 3)
     }
 }

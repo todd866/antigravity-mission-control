@@ -76,6 +76,10 @@ final class AgyAppModel {
         return all.filter { $0.state == target }
     }
 
+    var pendingRelays: [RelayItem] {
+        (board?.relays ?? []).filter { $0.status == "pending" }
+    }
+
     func saveCredentials(server: String, fallback: String = "", token: String) {
         let cleanServer = server.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -334,6 +338,7 @@ final class AgyAppModel {
                     counts: currentBoard.counts,
                     conversations: updated,
                     fleet: currentBoard.fleet,
+                    relays: currentBoard.relays,
                     projects: currentBoard.projects,
                     hosts: currentBoard.hosts,
                     host: currentBoard.host,
@@ -363,6 +368,44 @@ final class AgyAppModel {
         } catch {
             showToast(error.localizedDescription, isError: true)
             return false
+        }
+    }
+
+    func approveRelay(_ relay: RelayItem, text: String? = nil) async -> Bool {
+        do {
+            let res = try await withClientFailover {
+                try await $0.approveRelay(id: relay.id, host: relay.targetHost, text: text)
+            }
+            showToast(res.message ?? "Sent relay")
+            await refreshBoard()
+            return true
+        } catch {
+            showToast(error.localizedDescription, isError: true)
+            return false
+        }
+    }
+
+    func dismissRelay(_ relay: RelayItem) async {
+        do {
+            let res = try await withClientFailover {
+                try await $0.dismissRelay(id: relay.id, host: relay.targetHost)
+            }
+            showToast(res.message ?? "Dismissed relay")
+            await refreshBoard()
+        } catch {
+            showToast(error.localizedDescription, isError: true)
+        }
+    }
+
+    func toggleAutoWake(_ row: ConversationRow) async {
+        do {
+            let res = try await withClientFailover {
+                try await $0.toggleAutoWake(id: row.id, host: row.host)
+            }
+            showToast(res.message ?? (res.autoWake == true ? "Auto-wake enabled" : "Auto-wake disabled"))
+            await refreshBoard()
+        } catch {
+            showToast(error.localizedDescription, isError: true)
         }
     }
 }

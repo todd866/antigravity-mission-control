@@ -249,8 +249,8 @@ async function findTopNavLinkRef(name, timeoutMs = 4000) {
 
 async function expandSidebarSeeMore() {
   const res = await runAgentDesktop(
-    ['find', '--app', 'Antigravity', '--role', 'button', '--name', 'See more', '--timeout-ms', '1200'],
-    3000,
+    ['find', '--app', 'Antigravity', '--role', 'button', '--name', 'See more', '--timeout-ms', '3500'],
+    6000,
   ).catch(() => null);
   const btns = (res?.data?.matches || []).filter(
     (m) => isAgyWebareaPath(m.path) && segmentsAfterSidebar(m.path) >= 0 && m.ref_id,
@@ -286,17 +286,22 @@ async function findConversationLinkRef(title, timeoutMs = 6000) {
   return findRow(3500);
 }
 
-async function findMessageInput(timeoutMs = 1500) {
+async function findMessageInput(timeoutMs = 3500) {
   const res = await runAgentDesktop(
     ['find', '--app', 'Antigravity', '--role', 'textfield', '--name', 'Message input', '--timeout-ms', String(timeoutMs)],
-    timeoutMs + 2000,
+    timeoutMs + 2500,
   ).catch(() => null);
   if (!res?.ok) return null;
   return (res?.data?.matches || []).find((m) => isAgyWebareaPath(m.path) && m.ref_id) || null;
 }
 
 async function detectGlobalMissionControl() {
-  const match = await findMessageInput(450);
+  const res = await runAgentDesktop(
+    ['find', '--app', 'Antigravity', '--role', 'textfield', '--name', 'Message input', '--timeout-ms', '3500'],
+    6000,
+  ).catch(() => null);
+  if (!res?.ok) return false;
+  const match = (res?.data?.matches || []).find((m) => isAgyWebareaPath(m.path) && m.ref_id);
   if (!match) return true;
   const waName = getWebareaSegmentName(match.path);
   return waName.startsWith('Mission Control') || waName.startsWith('Plugins');
@@ -328,11 +333,11 @@ function readConversationProgress(conversationId) {
   }
 }
 
-async function findSendButtonRef(timeoutMs = 1800) {
+async function findSendButtonRef(timeoutMs = 3500) {
   for (const name of ['Send message', 'Queue message', 'Send']) {
     const found = await runAgentDesktop(
       ['find', '--app', 'Antigravity', '--role', 'button', '--name', name, '--timeout-ms', String(timeoutMs)],
-      timeoutMs + 1500,
+      timeoutMs + 2500,
     ).catch(() => null);
     const match = (found?.data?.matches || []).find((m) => isAgyWebareaPath(m.path) && m.ref_id);
     if (match?.ref_id) return match.ref_id;
@@ -347,9 +352,9 @@ async function submitComposerText(text, conversationId = null) {
   }
 
   let inputMatch = null;
-  for (let i = 0; i < 10; i += 1) {
-    await sleep(320);
-    inputMatch = await findMessageInput(800);
+  for (let i = 0; i < 6; i += 1) {
+    await sleep(250);
+    inputMatch = await findMessageInput(3500);
     if (inputMatch?.ref_id) break;
   }
   if (!inputMatch?.ref_id) {
@@ -374,16 +379,20 @@ async function submitComposerText(text, conversationId = null) {
 
   const baseline = conversationId ? readConversationProgress(conversationId) : null;
 
-  const clickInput = await runAgentDesktop(['--headed', 'click', inputMatch.ref_id], 10000);
-  if (!clickInput?.ok) {
-    return mapAxError(clickInput, 'Could not focus Message input');
-  }
+  await runAgentDesktop(['focus', inputMatch.ref_id], 5000).catch(() => null);
 
   const typeTimeoutMs = Math.max(12000, 6000 + cleanText.length * 45);
-  const typeRes = await runAgentDesktop(
+  let typeRes = await runAgentDesktop(
     ['--headed', 'type', inputMatch.ref_id, cleanText],
     typeTimeoutMs,
   );
+  if (!typeRes?.ok && String(typeRes?.error?.message || '').includes('Physical pointer')) {
+    await sleep(350);
+    typeRes = await runAgentDesktop(
+      ['--headed', 'type', inputMatch.ref_id, cleanText],
+      typeTimeoutMs,
+    );
+  }
   if (!typeRes?.ok) {
     const fallbackRead = await runAgentDesktop(['get', inputMatch.ref_id, '--property', 'value'], 3000).catch(() => null);
     if (!String(fallbackRead?.data?.value || '').trim()) {
@@ -393,14 +402,14 @@ async function submitComposerText(text, conversationId = null) {
 
   await sleep(180);
   const valCheck = await runAgentDesktop(['get', inputMatch.ref_id, '--property', 'value'], 4000).catch(() => null);
-  const sendRef = await findSendButtonRef(1800);
+  const sendRef = await findSendButtonRef(3500);
   if (!String(valCheck?.data?.value || '').trim() && !sendRef) {
     return { status: 502, body: { ok: false, error: 'Prompt text did not appear in Antigravity Message input' } };
   }
 
   let submitAttempted = false;
   if (sendRef) {
-    const clickSend = await runAgentDesktop(['--headed', 'click', sendRef], 10000);
+    const clickSend = await runAgentDesktop(['click', sendRef], 6000).catch(() => null);
     if (clickSend?.ok) {
       submitAttempted = true;
     }
@@ -426,11 +435,11 @@ async function submitComposerText(text, conversationId = null) {
         return { status: 200, body: { ok: true } };
       }
     }
-    const freshInput = await findMessageInput(600);
+    const freshInput = await findMessageInput(3000);
     if (freshInput?.ref_id) {
       const postVal = await runAgentDesktop(['get', freshInput.ref_id, '--property', 'value'], 2500).catch(() => null);
       if (postVal?.ok && String(postVal?.data?.value || '').trim() === '') {
-        const lingeringSend = await findSendButtonRef(400);
+        const lingeringSend = await findSendButtonRef(3000);
         if (!lingeringSend) {
           return { status: 200, body: { ok: true } };
         }
@@ -528,7 +537,7 @@ export async function sendMessageToThread(detail, text) {
     const res = await submitComposerText(text, detail.id);
 
     if (wasOnGlobal && res.status === 200) {
-      const nav = await findTopNavLinkRef('Mission Control', 2500).catch(() => ({ ref: null }));
+      const nav = await findTopNavLinkRef('Mission Control', 3500).catch(() => ({ ref: null }));
       if (nav?.ref) {
         await runAgentDesktop(['click', nav.ref], 4000).catch(() => {});
       }

@@ -26,6 +26,7 @@ struct ThreadDetailView: View {
             VStack(alignment: .leading, spacing: 12) {
                 headerCard
                 actionButtons
+                pendingRelaysCard
 
                 let needsCallText = !current.waitingReason.isEmpty
                     ? current.waitingReason
@@ -244,6 +245,20 @@ struct ThreadDetailView: View {
                 }
                 .buttonStyle(.bordered)
 
+                Button {
+                    Task {
+                        await model.toggleAutoWake(current)
+                        await loadFullDetail()
+                    }
+                } label: {
+                    Label(
+                        current.autoWake == true ? "Auto-wake On" : "Auto-wake",
+                        systemImage: current.autoWake == true ? "bolt.fill" : "bolt"
+                    )
+                }
+                .buttonStyle(.bordered)
+                .tint(current.autoWake == true ? .green : .secondary)
+
                 if current.state == .working {
                     Button(role: .destructive) {
                         showStopConfirm = true
@@ -279,6 +294,58 @@ struct ThreadDetailView: View {
                 .buttonStyle(.bordered)
             }
             .font(.caption.weight(.medium))
+        }
+    }
+
+    @ViewBuilder
+    private var pendingRelaysCard: some View {
+        let items = model.pendingRelays.filter { $0.targetConversationId == current.id }
+        if !items.isEmpty {
+            sectionCard(title: "Pending agent messages (\(items.count))") {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(items) { relay in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("From \(relay.fromLabel)")
+                                .font(.caption.weight(.semibold))
+                            Text(relay.message)
+                                .font(.subheadline)
+                                .textSelection(.enabled)
+                            Text(relay.reason)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            HStack(spacing: 8) {
+                                Button("Approve & Send") {
+                                    isSending = true
+                                    Task {
+                                        if await model.approveRelay(relay) {
+                                            await loadFullDetail()
+                                        }
+                                        isSending = false
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                                .disabled(isSending)
+
+                                Button("Edit") {
+                                    draftMessage = relay.message
+                                    composerFocused = true
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+
+                                Button("Dismiss") {
+                                    Task { await model.dismissRelay(relay) }
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                        }
+                        .padding(9)
+                        .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                }
+            }
         }
     }
 

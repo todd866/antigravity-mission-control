@@ -106,6 +106,27 @@ struct AgyAPIClient: Sendable {
         return try await request(path: "/v1/threads/new", method: "POST", body: body, authenticated: true)
     }
 
+    func approveRelay(id: String, host: String? = nil, text: String? = nil) async throws -> ActionResult {
+        var payload = hostBody(host)
+        if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            payload["text"] = text
+        }
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        return try await request(path: "/v1/relay/\(id)/approve", method: "POST", body: body, authenticated: true)
+    }
+
+    func dismissRelay(id: String, host: String? = nil) async throws -> ActionResult {
+        let body = try JSONSerialization.data(withJSONObject: hostBody(host))
+        return try await request(path: "/v1/relay/\(id)/dismiss", method: "POST", body: body, authenticated: true)
+    }
+
+    func toggleAutoWake(id: String, host: String? = nil, enabled: Bool? = nil) async throws -> AutoWakeResult {
+        var payload = hostBody(host)
+        if let enabled { payload["enabled"] = enabled }
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        return try await request(path: "/v1/threads/\(id)/auto-wake", method: "POST", body: body, authenticated: true)
+    }
+
     private func hostBody(_ host: String?) -> [String: Any] {
         guard let host, !host.isEmpty else { return [:] }
         return ["host": host]

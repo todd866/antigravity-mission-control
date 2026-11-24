@@ -18,8 +18,18 @@ import {
   getFederatedDetail,
   loadPeerConfig,
   proxyPeerRequest,
+  resolveConversationByTitleOrId,
   resolveOwnerPeer,
+  resolveRelayOwner,
 } from '../plugin/src/federation.mjs';
+import {
+  approveLocalRelay,
+  dismissLocalRelay,
+  getLocalRelays,
+  setAutoWake,
+  submitLocalRelay,
+  toggleAutoWake,
+} from '../plugin/src/relay.mjs';
 
 const HOME = homedir();
 const PORT = Number(process.env.AGY_CONTROL_PORT || 8696);
@@ -334,6 +344,202 @@ const server = createServer(async (req, res) => {
       const out = await startNewThread(projectName, text);
       if (out.status === 200) audit('new_thread', { project: projectName || '', chars: text.length });
       return sendJson(res, out.status, out.body);
+    }
+
+    if (req.method === 'GET' && url.pathname === '/v1/relay') {
+      const { selfName } = loadPeerConfig();
+      const targetConv = url.searchParams.get('conversationId')?.trim() || '';
+      const relayIdFilter = url.searchParams.get('relayId')?.trim() || '';
+      let relays = localOnly
+        ? getLocalRelays(40).map((r) => ({ ...r, targetHost: r.targetHost || selfName }))
+        : ((await getFederatedBoard({ includeFleet: false, includeHidden: false })).relays || []);
+      if (relayIdFilter) {
+        relays = relays.filter((r) => r.id === relayIdFilter);
+      } else if (targetConv) {
+        relays = relays.filter((r) => r.targetConversationId === targetConv);
+      }
+      return sendJson(res, 200, { ok: true, relays });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/relay') {
+      const body = await readJsonBody(req);
+      const message = typeof body.message === 'string' ? body.message.trim() : '';
+      const targetConversationId = typeof body.targetConversationId === 'string' ? body.targetConversationId.trim() : '';
+      const targetTitle = typeof body.targetTitle === 'string' ? body.targetTitle.trim() : '';
+      const explicitHost = queryHost || (typeof body.host === 'string' ? body.host.trim() : '') || null;
+      const fromConversationId = typeof body.fromConversationId === 'string' ? body.fromConversationId.trim() : '';
+      const fromLabel = typeof body.fromLabel === 'string' ? body.fromLabel.trim() : '';
+      const hop = Number.isFinite(Number(body.hop)) ? Number(body.hop) : 1;
+
+      if (!message || message.length > 2000) {
+        return sendJson(res, 400, { ok: false, error: 'Relay message must be 1..2000 characters' });
+      }
+
+      if (localOnly) {
+        if (!UUID_RE.test(targetConversationId)) {
+          return sendJson(res, 400, { ok: false, error: 'Invalid targetConversationId' });
+        }
+        const { selfName } = loadPeerConfig();
+        const detail = getThreadDetail(targetConversationId);
+        const out = await submitLocalRelay({
+          detail: detail ? { ...detail, host: selfName } : null,
+          targetHost: selfName,
+          fromConversationId,
+          fromLabel,
+          message,
+          hop,
+          sendFn: sendMessageToThread,
+        });
+        if (out.status < 300) {
+          audit('relay_submit', {
+            id: out.body?.relay?.id || '',
+            targetId: targetConversationId,
+            delivery: out.body?.delivery || '',
+          });
+        }
+        return sendJson(res, out.status, out.body);
+      }
+
+      const resolved = await resolveConversationByTitleOrId({
+        targetConversationId,
+        targetTitle,
+        host: explicitHost,
+      });
+      if (!resolved.ok) {
+        return sendJson(res, resolved.status, {
+          ok: false,
+          error: resolved.error,
+          ...(resolved.matches ? { matches: resolved.matches } : {}),
+        });
+      }
+
+      const { owner } = resolved;
+      const resolvedId = owner.detail?.id || owner.target?.id || targetConversationId;
+      if (!owner.isSelf && owner.peer) {
+        const out = await proxyPeerRequest(owner.peer, '/v1/relay', {
+          method: 'POST',
+          body: {
+            targetConversationId: resolvedId,
+            message,
+            fromConversationId,
+            fromLabel,
+            hop,
+          },
+          timeoutMs: 25000,
+        });
+        if (out.body?.relay && !out.body.relay.targetHost) {
+          out.body.relay.targetHost = owner.host;
+        }
+        return sendJson(res, out.status, out.body);
+      }
+
+      const { selfName } = loadPeerConfig();
+      const detail = owner.detail || getThreadDetail(resolvedId);
+      const out = await submitLocalRelay({
+        detail: detail ? { ...detail, host: selfName } : null,
+        targetHost: selfName,
+        fromConversationId,
+        fromLabel,
+        message,
+        hop,
+        sendFn: sendMessageToThread,
+      });
+      if (out.status < 300) {
+        audit('relay_submit', {
+          id: out.body?.relay?.id || '',
+          targetId: resolvedId,
+          delivery: out.body?.delivery || '',
+        });
+      }
+      return sendJson(res, out.status, out.body);
+    }
+
+    const relayApproveMatch = url.pathname.match(/^\/v1\/relay\/([^/]+)\/approve$/);
+    if (req.method === 'POST' && relayApproveMatch) {
+      const id = decodeURIComponent(relayApproveMatch[1]);
+      if (!UUID_RE.test(id)) return sendJson(res, 400, { ok: false, error: 'Invalid relay id' });
+      const body = await readJsonBody(req);
+      const editedText = typeof body.text === 'string' ? body.text.trim() : '';
+      const explicitHost = queryHost || (typeof body.host === 'string' ? body.host.trim() : '') || null;
+
+      if (!localOnly) {
+        const owner = await resolveRelayOwner(id, explicitHost);
+        if (!owner) return sendJson(res, 404, { ok: false, error: 'Relay not found' });
+        if (!owner.isSelf && owner.peer) {
+          const out = await proxyPeerRequest(owner.peer, `/v1/relay/${encodeURIComponent(id)}/approve`, {
+            method: 'POST',
+            body: editedText ? { text: editedText } : {},
+            timeoutMs: 25000,
+          });
+          return sendJson(res, out.status, out.body);
+        }
+      }
+
+      const out = await approveLocalRelay(id, {
+        editedMessage: editedText,
+        getDetailFn: getThreadDetail,
+        sendFn: sendMessageToThread,
+      });
+      if (out.status === 200) audit('relay_approve', { id });
+      return sendJson(res, out.status, out.body);
+    }
+
+    const relayDismissMatch = url.pathname.match(/^\/v1\/relay\/([^/]+)\/dismiss$/);
+    if (req.method === 'POST' && relayDismissMatch) {
+      const id = decodeURIComponent(relayDismissMatch[1]);
+      if (!UUID_RE.test(id)) return sendJson(res, 400, { ok: false, error: 'Invalid relay id' });
+      const body = await readJsonBody(req);
+      const explicitHost = queryHost || (typeof body.host === 'string' ? body.host.trim() : '') || null;
+
+      if (!localOnly) {
+        const owner = await resolveRelayOwner(id, explicitHost);
+        if (!owner) return sendJson(res, 404, { ok: false, error: 'Relay not found' });
+        if (!owner.isSelf && owner.peer) {
+          const out = await proxyPeerRequest(owner.peer, `/v1/relay/${encodeURIComponent(id)}/dismiss`, {
+            method: 'POST',
+            body: {},
+            timeoutMs: 10000,
+          });
+          return sendJson(res, out.status, out.body);
+        }
+      }
+
+      const out = dismissLocalRelay(id);
+      if (out.status === 200) audit('relay_dismiss', { id });
+      return sendJson(res, out.status, out.body);
+    }
+
+    const autoWakeMatch = url.pathname.match(/^\/v1\/threads\/([^/]+)\/auto-wake$/);
+    if (req.method === 'POST' && autoWakeMatch) {
+      const id = decodeURIComponent(autoWakeMatch[1]);
+      if (!UUID_RE.test(id)) return sendJson(res, 400, { ok: false, error: 'Invalid conversation id' });
+      const body = await readJsonBody(req);
+      const explicitHost = queryHost || (typeof body.host === 'string' ? body.host.trim() : '') || null;
+      const hasExplicitBool = typeof body.enabled === 'boolean';
+
+      if (!localOnly) {
+        const owner = await resolveOwnerPeer(id, explicitHost);
+        if (!owner) return sendJson(res, 404, { ok: false, error: 'Conversation not found' });
+        if (!owner.isSelf && owner.peer) {
+          const out = await proxyPeerRequest(owner.peer, `/v1/threads/${encodeURIComponent(id)}/auto-wake`, {
+            method: 'POST',
+            body: hasExplicitBool ? { enabled: body.enabled } : {},
+            timeoutMs: 10000,
+          });
+          return sendJson(res, out.status, out.body);
+        }
+      }
+
+      const detail = getThreadDetail(id);
+      if (!detail) return sendJson(res, 404, { ok: false, error: 'Conversation not found' });
+      const autoWake = hasExplicitBool ? setAutoWake(id, body.enabled) : toggleAutoWake(id);
+      audit('auto_wake', { id, autoWake });
+      return sendJson(res, 200, {
+        ok: true,
+        conversationId: id,
+        autoWake,
+        message: `${autoWake ? 'Enabled' : 'Disabled'} auto-wake for ${detail.title}`,
+      });
     }
 
     return sendJson(res, 404, { ok: false, error: 'Not found' });

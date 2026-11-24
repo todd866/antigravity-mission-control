@@ -66,6 +66,23 @@ interface ProjectInfo {
   host?: string;
 }
 
+interface RelayItem {
+  id: string;
+  fromConversationId?: string;
+  fromLabel: string;
+  targetConversationId: string;
+  targetTitle: string;
+  targetHost: string;
+  message: string;
+  hop: number;
+  status: 'pending' | 'sent' | 'dismissed' | 'failed';
+  autoDelivered?: boolean;
+  reason: string;
+  createdAt: number;
+  resolvedAt?: number;
+  error?: string;
+}
+
 interface ConversationItem {
   id: string;
   shortId: string;
@@ -81,6 +98,7 @@ interface ConversationItem {
   ageMs: number;
   lastModifiedMs: number;
   lastUserInputMs: number;
+  autoWake?: boolean;
   focus: string;
   focusIsCurrentTurn?: boolean;
   steps: StepsInfo | null;
@@ -130,9 +148,11 @@ interface BoardSnapshot {
     unread: number;
     idle: number;
     hidden: number;
+    pendingRelays?: number;
   };
   conversations: ConversationItem[];
   fleet: FleetItem[];
+  relays?: RelayItem[];
   hosts?: HostInfo[];
   projects?: ProjectInfo[];
   host?: string;
@@ -214,11 +234,12 @@ const ui = {
   snapshot: null as BoardSnapshot | null,
   filter: 'all' as FilterMode,
   hostFilter: 'all' as string,
-  view: 'threads' as 'threads' | 'fleet',
+  view: 'threads' as 'threads' | 'fleet' | 'relay',
   selectedId: null as string | null,
   detail: null as ConversationItem | null,
   refreshingBriefId: null as string | null,
   sendingId: null as string | null,
+  relayActionId: null as string | null,
   showNewForm: false,
   newHost: '' as string,
   newProject: '' as string,
@@ -528,6 +549,76 @@ async function createNewConversation() {
   }
 }
 
+async function approveRelayAction(relayId: string, host?: string, editedText?: string) {
+  if (!relayId || ui.relayActionId) return;
+  ui.relayActionId = relayId;
+  render();
+  try {
+    const args: Record<string, string> = { relayId };
+    if (host) args.host = host;
+    if (editedText && editedText.trim()) args.text = editedText.trim();
+    const res = await app.callServerTool({ name: 'approve_relay', arguments: args });
+    const sc = res?.structuredContent as { ok?: boolean; message?: string; error?: string } | undefined;
+    showToast(sc?.ok ? (sc.message || 'Sent relay') : (sc?.error || 'Could not send relay'));
+    if (sc?.ok) scheduleRapidRefresh();
+    else void pollBoard();
+  } catch {
+    showToast('Could not send relay');
+  } finally {
+    ui.relayActionId = null;
+    render();
+  }
+}
+
+async function dismissRelayAction(relayId: string, host?: string) {
+  if (!relayId || ui.relayActionId) return;
+  ui.relayActionId = relayId;
+  render();
+  try {
+    const res = await app.callServerTool({
+      name: 'dismiss_relay',
+      arguments: host ? { relayId, host } : { relayId },
+    });
+    const sc = res?.structuredContent as { ok?: boolean; message?: string; error?: string } | undefined;
+    showToast(sc?.ok ? (sc.message || 'Dismissed relay') : (sc?.error || 'Could not dismiss relay'));
+    void pollBoard();
+  } catch {
+    showToast('Could not dismiss relay');
+  } finally {
+    ui.relayActionId = null;
+    render();
+  }
+}
+
+async function toggleAutoWakeAction(item: ConversationItem) {
+  try {
+    const res = await app.callServerTool({
+      name: 'toggle_auto_wake',
+      arguments: item.host ? { conversationId: item.id, host: item.host } : { conversationId: item.id },
+    });
+    const sc = res?.structuredContent as { ok?: boolean; autoWake?: boolean; message?: string; error?: string } | undefined;
+    if (sc?.ok) {
+      if (ui.detail?.id === item.id) {
+        ui.detail = { ...ui.detail, autoWake: Boolean(sc.autoWake) };
+      }
+      if (ui.snapshot) {
+        ui.snapshot = {
+          ...ui.snapshot,
+          conversations: ui.snapshot.conversations.map((c) =>
+            c.id === item.id ? { ...c, autoWake: Boolean(sc.autoWake) } : c,
+          ),
+        };
+      }
+      showToast(sc.message || (sc.autoWake ? 'Auto-wake enabled' : 'Auto-wake disabled'));
+      void pollBoard();
+    } else {
+      showToast(sc?.error || 'Could not update auto-wake');
+    }
+  } catch {
+    showToast('Could not update auto-wake');
+  }
+}
+
 function renderTopBar(snap: BoardSnapshot): string {
   const c = snap.counts;
   const filters: Array<{ key: FilterMode; label: string; count: number; icon: string }> = [
@@ -584,6 +675,13 @@ function renderTopBar(snap: BoardSnapshot): string {
       ? `<button type="button" class="mc-btn" data-action="toggle-fleet" data-focus-key="fleet" aria-pressed="${ui.view === 'fleet'}">Fleet <span class="num">${fleetCount}</span></button>`
       : '';
 
+  const relays = snap.relays || [];
+  const pendingRelaysCount = relays.filter((r) => r.status === 'pending').length;
+  const relayBtn =
+    relays.length > 0 || ui.view === 'relay'
+      ? `<button type="button" class="mc-btn${pendingRelaysCount > 0 ? ' is-relay-pending' : ''}" data-action="toggle-relay" data-focus-key="relay" aria-pressed="${ui.view === 'relay'}" title="Agent Relay messages">${pendingRelaysCount > 0 ? `Relay <span class="num">${pendingRelaysCount}</span>` : 'Relay'}</button>`
+      : '';
+
   const hiddenBtn =
     c.hidden > 0
       ? `<button type="button" class="mc-btn" data-action="unhide-all" data-focus-key="unhide" title="Restore hidden conversations">Show <span class="num">${c.hidden}</span></button>`
@@ -596,6 +694,7 @@ function renderTopBar(snap: BoardSnapshot): string {
     <div class="mc-bar-right">
       ${toastHtml}
       <button type="button" class="mc-btn" data-action="toggle-new" data-focus-key="new-btn" aria-pressed="${ui.showNewForm}">+ New</button>
+      ${relayBtn}
       ${fleetBtn}
       ${hiddenBtn}
       <div class="mc-seg mc-bar-sort" role="group" aria-label="Sort order">${sortHtml}</div>
@@ -666,6 +765,15 @@ function renderThreadRow(item: ConversationItem, sortMode: SortMode, index: numb
       : '';
   const showHostBadge = (ui.snapshot?.hosts?.length || 0) > 1 && Boolean(item.host);
   const hostBadgeHtml = showHostBadge ? `<span class="mc-host-badge">${esc(item.host)}</span>` : '';
+  const pendingRowRelays = (ui.snapshot?.relays || []).filter(
+    (r) => r.status === 'pending' && r.targetConversationId === item.id,
+  ).length;
+  const wakeBadgeHtml = item.autoWake
+    ? '<span class="mc-wake-badge" title="Guarded agent Auto-wake enabled">Auto</span>'
+    : '';
+  const relayRowBadgeHtml = pendingRowRelays > 0
+    ? `<span class="mc-relay-badge" title="${pendingRowRelays} pending agent message${pendingRowRelays === 1 ? '' : 's'}">${pendingRowRelays}</span>`
+    : '';
   const stepTitle = item.steps?.currentTitle ? `${item.steps.done}/${item.steps.total}: ${item.steps.currentTitle}` : '';
   const selected = ui.selectedId === item.id;
 
@@ -683,6 +791,8 @@ function renderThreadRow(item: ConversationItem, sortMode: SortMode, index: numb
       <span class="mc-title" title="${esc(item.title)}">${esc(item.title)}</span>
       <span class="mc-project" title="${esc(item.projectName + subTag)}">${esc(item.projectName)}${esc(subTag)}</span>
       ${hostBadgeHtml}
+      ${wakeBadgeHtml}
+      ${relayRowBadgeHtml}
     </div>
     <div class="${focusCls}" title="${esc(focusText)}">
       <span class="mc-focus-text">${esc(focusText)}</span>
@@ -713,6 +823,69 @@ function renderFleetPane(fleet: FleetItem[]): string {
     </div>`,
     )
     .join('');
+}
+
+function renderRelayPane(relays: RelayItem[]): string {
+  const pending = relays.filter((r) => r.status === 'pending');
+  const recent = relays.filter((r) => r.status !== 'pending');
+  if (relays.length === 0) {
+    return '<div class="mc-empty">No agent relay messages yet.</div>';
+  }
+
+  const pendingHtml =
+    pending.length > 0
+      ? pending
+          .map((r) => {
+            const busy = ui.relayActionId === r.id;
+            const age = fmtAge(Math.max(0, Date.now() - Number(r.createdAt || 0)));
+            return `<div class="mc-relay-card is-pending">
+              <div class="mc-relay-head">
+                <div class="mc-relay-route">
+                  <strong>${esc(r.fromLabel)}</strong> → <strong>${esc(r.targetTitle)}</strong>
+                  ${r.targetHost ? `<span class="mc-host-badge">${esc(r.targetHost)}</span>` : ''}
+                  <span class="num mc-relay-age">${age}</span>
+                </div>
+                <div class="mc-relay-actions">
+                  <button type="button" class="mc-btn mc-btn-xs mc-btn-primary" data-action="approve-relay" data-id="${esc(r.id)}" data-host="${esc(r.targetHost)}" ${busy ? 'disabled' : ''}>${busy ? 'Sending...' : 'Approve & Send'}</button>
+                  <button type="button" class="mc-btn mc-btn-xs" data-action="edit-relay-in-tab" data-id="${esc(r.id)}" data-target-id="${esc(r.targetConversationId)}">Edit in tab</button>
+                  <button type="button" class="mc-btn mc-btn-xs" data-action="dismiss-relay" data-id="${esc(r.id)}" data-host="${esc(r.targetHost)}" ${busy ? 'disabled' : ''}>Dismiss</button>
+                </div>
+              </div>
+              <p class="mc-relay-msg">${esc(r.message)}</p>
+              <div class="mc-relay-reason">${esc(r.reason)}</div>
+              ${r.error ? `<div class="mc-relay-error">${esc(r.error)}</div>` : ''}
+            </div>`;
+          })
+          .join('')
+      : '<div class="mc-empty">No pending agent messages waiting for approval.</div>';
+
+  const recentHtml =
+    recent.length > 0
+      ? `<details class="mc-disclosure mc-relay-history">
+          <summary>Recent relays (${recent.length})</summary>
+          <div class="mc-disclosure-body mc-relay-list">
+            ${recent
+              .map((r) => {
+                const age = fmtAge(Math.max(0, Date.now() - Number(r.resolvedAt || r.createdAt || 0)));
+                return `<div class="mc-relay-card">
+                  <div class="mc-relay-head">
+                    <div class="mc-relay-route">
+                      <span class="mc-tag-muted">${esc(r.status)}</span>
+                      <strong>${esc(r.fromLabel)}</strong> → <strong>${esc(r.targetTitle)}</strong>
+                      ${r.targetHost ? `<span class="mc-host-badge">${esc(r.targetHost)}</span>` : ''}
+                    </div>
+                    <span class="num mc-relay-age">${age}</span>
+                  </div>
+                  <p class="mc-relay-msg">${esc(r.message)}</p>
+                  <div class="mc-relay-reason">${esc(r.reason)}</div>
+                </div>`;
+              })
+              .join('')}
+          </div>
+        </details>`
+      : '';
+
+  return `<div class="mc-relay-pane">${pendingHtml}${recentHtml}</div>`;
 }
 
 function formatInlineMarkdown(escaped: string): string {
@@ -962,6 +1135,35 @@ function renderDetailPane(d: ConversationItem): string {
       : '';
 
   const showHostMeta = (ui.snapshot?.hosts?.length || 0) > 1 && Boolean(d.host);
+  const pendingRelaysForTab = (ui.snapshot?.relays || []).filter(
+    (r) => r.status === 'pending' && r.targetConversationId === d.id,
+  );
+  const pendingRelaysBlock =
+    pendingRelaysForTab.length > 0
+      ? `<div class="mc-detail-block">
+          <div class="mc-detail-label">Pending agent messages (${pendingRelaysForTab.length})</div>
+          <div class="mc-relay-list">
+            ${pendingRelaysForTab
+              .map((r) => {
+                const busy = ui.relayActionId === r.id;
+                return `<div class="mc-next-card is-pending">
+                  <div class="mc-next-head">
+                    <span class="mc-next-label">From ${esc(r.fromLabel)}</span>
+                    <div class="mc-next-btns">
+                      <button type="button" class="mc-btn mc-btn-xs mc-btn-primary" data-action="approve-relay" data-id="${esc(r.id)}" data-host="${esc(r.targetHost)}" ${busy ? 'disabled' : ''}>${busy ? 'Sending...' : 'Approve & Send'}</button>
+                      <button type="button" class="mc-btn mc-btn-xs" data-action="edit-relay" data-id="${esc(r.id)}" data-target-id="${esc(d.id)}">Edit</button>
+                      <button type="button" class="mc-btn mc-btn-xs" data-action="dismiss-relay" data-id="${esc(r.id)}" data-host="${esc(r.targetHost)}" ${busy ? 'disabled' : ''}>Dismiss</button>
+                    </div>
+                  </div>
+                  <p class="mc-relay-msg">${esc(r.message)}</p>
+                  <div class="mc-relay-reason">${esc(r.reason)}</div>
+                  ${r.error ? `<div class="mc-relay-error">${esc(r.error)}</div>` : ''}
+                </div>`;
+              })
+              .join('')}
+          </div>
+        </div>`
+      : '';
 
   return `<aside class="mc-detail" aria-label="Conversation details">
     <div class="mc-detail-head">
@@ -979,6 +1181,7 @@ function renderDetailPane(d: ConversationItem): string {
     <div class="mc-detail-actions">
       <button type="button" class="mc-btn" data-action="open" data-id="${esc(d.id)}">${ICON_OPEN} Open in Antigravity</button>
       <button type="button" class="mc-btn" data-action="refresh-brief" data-id="${esc(d.id)}" ${refreshing ? 'disabled' : ''}>${refreshing ? 'Refreshing...' : 'Refresh brief'}</button>
+      <button type="button" class="mc-btn${d.autoWake ? ' is-autowake-on' : ''}" data-action="toggle-autowake" data-id="${esc(d.id)}" aria-pressed="${Boolean(d.autoWake)}" title="Allow other agents to wake this tab automatically when idle">${d.autoWake ? 'Auto-wake: On' : 'Auto-wake: Off'}</button>
       ${d.state === 'working' ? `<button type="button" class="mc-btn mc-btn-danger" data-action="stop" data-id="${esc(d.id)}">Stop</button>` : ''}
       <button type="button" class="mc-btn" data-action="pin" data-id="${esc(d.id)}">${d.pinned ? 'Unpin' : 'Pin'}</button>
       ${d.slot > 1 ? `<button type="button" class="mc-btn" data-action="move-top" data-id="${esc(d.id)}">Send to top</button>` : ''}
@@ -986,6 +1189,7 @@ function renderDetailPane(d: ConversationItem): string {
       <button type="button" class="mc-btn" data-action="hide" data-id="${esc(d.id)}">Hide</button>
       <button type="button" class="mc-btn" data-action="copy-id" data-id="${esc(d.id)}">Copy ID</button>
     </div>
+    ${pendingRelaysBlock}
     ${needsCallBlock}
     ${briefingBlock}
     ${nextBlock}
@@ -1011,9 +1215,11 @@ function render() {
   const listHtml =
     ui.view === 'fleet'
       ? renderFleetPane(snap.fleet || [])
-      : rows.length > 0
-        ? rows.map((item, idx) => renderThreadRow(item, snap.sortMode, idx, rows)).join('')
-        : '<div class="mc-empty">No conversations match this filter.</div>';
+      : ui.view === 'relay'
+        ? renderRelayPane(snap.relays || [])
+        : rows.length > 0
+          ? rows.map((item, idx) => renderThreadRow(item, snap.sortMode, idx, rows)).join('')
+          : '<div class="mc-empty">No conversations match this filter.</div>';
 
   const hasDetail = Boolean(ui.detail && ui.view === 'threads');
   const detailHtml = hasDetail && ui.detail ? renderDetailPane(ui.detail) : '';
@@ -1026,6 +1232,7 @@ function render() {
     detail: detailHtml,
     refreshing: ui.refreshingBriefId,
     sending: ui.sendingId,
+    relayAction: ui.relayActionId,
     sendStatus: ui.sendStatus,
     draft: ui.selectedId ? (ui.drafts[ui.selectedId] || '') : '',
   });
@@ -1145,6 +1352,41 @@ document.addEventListener('click', (event) => {
   } else if (action === 'toggle-fleet') {
     ui.view = ui.view === 'fleet' ? 'threads' : 'fleet';
     render();
+  } else if (action === 'toggle-relay') {
+    ui.view = ui.view === 'relay' ? 'threads' : 'relay';
+    render();
+  } else if (action === 'approve-relay' && id) {
+    event.stopPropagation();
+    void approveRelayAction(id, target.dataset.host);
+  } else if (action === 'dismiss-relay' && id) {
+    event.stopPropagation();
+    void dismissRelayAction(id, target.dataset.host);
+  } else if (action === 'edit-relay' && id) {
+    event.stopPropagation();
+    const tid = target.dataset.targetId || ui.selectedId || '';
+    const relay = (ui.snapshot?.relays || []).find((r) => r.id === id);
+    if (tid && relay) {
+      ui.drafts[tid] = relay.message;
+      render();
+      const input = document.querySelector<HTMLTextAreaElement>(`.mc-composer-input[data-composer-id="${CSS.escape(tid)}"]`);
+      if (input) {
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      }
+    }
+  } else if (action === 'edit-relay-in-tab' && id) {
+    event.stopPropagation();
+    const tid = target.dataset.targetId || '';
+    const relay = (ui.snapshot?.relays || []).find((r) => r.id === id);
+    if (tid && relay) {
+      ui.view = 'threads';
+      ui.drafts[tid] = relay.message;
+      void loadThreadDetail(tid);
+    }
+  } else if (action === 'toggle-autowake' && id) {
+    event.stopPropagation();
+    const item = ui.detail?.id === id ? ui.detail : ui.snapshot?.conversations.find((c) => c.id === id);
+    if (item) void toggleAutoWakeAction(item);
   } else if (action === 'toggle-new') {
     ui.showNewForm = !ui.showNewForm;
     render();

@@ -107,6 +107,21 @@ struct BoardCounts: Codable, Sendable, Equatable {
     let unread: Int
     let idle: Int
     let hidden: Int
+    let pendingRelays: Int?
+}
+
+struct RelayItem: Codable, Sendable, Equatable, Hashable, Identifiable {
+    let id: String
+    let fromLabel: String
+    let targetConversationId: String
+    let targetTitle: String
+    let targetHost: String
+    let message: String
+    let hop: Int
+    let status: String
+    let reason: String
+    let createdAt: Double
+    let error: String?
 }
 
 struct StepItem: Codable, Sendable, Hashable, Identifiable {
@@ -211,6 +226,7 @@ struct ConversationRow: Codable, Sendable, Identifiable, Hashable {
     let ageMs: Double
     let lastModifiedMs: Double
     let lastUserInputMs: Double
+    let autoWake: Bool?
     let focus: String
     let focusIsCurrentTurn: Bool?
     let steps: StepsInfo?
@@ -346,11 +362,20 @@ struct BoardResponse: Codable, Sendable, Equatable {
     let counts: BoardCounts
     let conversations: [ConversationRow]
     let fleet: [FleetAgent]
+    let relays: [RelayItem]?
     let projects: [ProjectInfo]?
     let hosts: [HostInfo]?
     let host: String?
     let macAccessibility: Bool?
     let remoteControlUrl: String?
+}
+
+struct AutoWakeResult: Codable, Sendable {
+    let ok: Bool
+    let conversationId: String?
+    let autoWake: Bool?
+    let message: String?
+    let error: String?
 }
 
 struct ThreadDetailResponse: Codable, Sendable {

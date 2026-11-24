@@ -994,6 +994,129 @@ body {
   font-size: 12px;
 }
 
+.mc-btn.is-relay-pending {
+  border-color: var(--mc-attention);
+  background: var(--mc-attention-bg);
+  color: var(--mc-attention);
+  font-weight: 600;
+}
+
+.mc-btn.is-autowake-on {
+  border-color: var(--mc-unread);
+  background: var(--mc-unread-bg);
+  color: var(--mc-unread);
+  font-weight: 600;
+}
+
+.mc-wake-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 15px;
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--mc-unread) 45%, var(--mc-border));
+  border-radius: 4px;
+  background: var(--mc-unread-bg);
+  color: var(--mc-unread);
+  font-size: 9.5px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.mc-relay-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 15px;
+  min-width: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--mc-attention);
+  color: #111317;
+  font-size: 9.5px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.mc-relay-pane {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mc-relay-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mc-relay-card {
+  border: 1px solid var(--mc-border);
+  border-radius: 6px;
+  background: var(--mc-bg-2);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.mc-relay-card.is-pending,
+.mc-next-card.is-pending {
+  border-color: color-mix(in srgb, var(--mc-attention) 50%, var(--mc-border));
+}
+
+.mc-relay-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mc-relay-route {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--mc-fg);
+}
+
+.mc-relay-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.mc-relay-age {
+  font-size: 10.5px;
+  color: var(--mc-fg-3);
+}
+
+.mc-relay-msg {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.42;
+  color: var(--mc-fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.mc-relay-reason {
+  font-size: 10.5px;
+  color: var(--mc-fg-3);
+}
+
+.mc-relay-error {
+  font-size: 11px;
+  color: var(--mc-danger);
+}
+
+.mc-relay-history {
+  margin-top: 4px;
+}
+
 @keyframes mc-spin {
   to { transform: rotate(360deg); }
 }

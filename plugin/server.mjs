@@ -14,8 +14,17 @@ import {
   getFederatedDetail,
   loadPeerConfig,
   proxyPeerRequest,
+  resolveConversationByTitleOrId,
   resolveOwnerPeer,
+  resolveRelayOwner,
 } from './src/federation.mjs';
+import {
+  approveLocalRelay,
+  dismissLocalRelay,
+  setAutoWake,
+  submitLocalRelay,
+  toggleAutoWake,
+} from './src/relay.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const APP_URI = 'ui://mission-control/app.html';
@@ -408,6 +417,252 @@ server.registerTool(
     return {
       content: [{ type: 'text', text: out.body.ok ? out.body.message : (out.body.error || 'Start failed') }],
       structuredContent: out.body,
+    };
+  },
+);
+
+server.registerTool(
+  'list_conversations',
+  {
+    title: 'List Antigravity Conversations',
+    description: 'Read-only list of open Antigravity conversations across connected Macs with ID, host, state, headline, and autoWake flag.',
+    inputSchema: {
+      filter: z.enum(['all', 'attention', 'working', 'bg', 'unread', 'idle']).optional(),
+      host: z.string().optional(),
+      limit: z.number().int().min(1).max(60).optional(),
+    },
+  },
+  async ({ filter = 'all', host, limit = 30 } = {}) => {
+    const snap = await getFederatedBoard({ includeFleet: false, includeHidden: false });
+    let list = snap.conversations || [];
+    if (host) list = list.filter((c) => c.host === host);
+    if (filter !== 'all') list = list.filter((c) => c.state === filter);
+    const slice = list.slice(0, limit).map((c) => ({
+      id: c.id,
+      slot: c.slot,
+      host: c.host || snap.host,
+      title: c.title,
+      projectName: c.projectName,
+      state: c.state,
+      autoWake: Boolean(c.autoWake),
+      headline: c.waitingReason || c.briefing?.headline || (c.focusIsCurrentTurn ? c.focus : '') || c.lastReply || '',
+      ageMs: c.ageMs,
+    }));
+    const text = slice
+      .map((c) => `#${c.slot} [${c.host}] ${c.state}${c.autoWake ? ' auto-wake' : ''} · ${c.title} (${c.id.slice(0, 8)})${c.headline ? ` — ${c.headline}` : ''}`)
+      .join('\n') || 'No matching conversations.';
+    return {
+      content: [{ type: 'text', text }],
+      structuredContent: { host: snap.host, counts: snap.counts, conversations: slice },
+    };
+  },
+);
+
+server.registerTool(
+  'relay_to_conversation',
+  {
+    title: 'Relay Message to Another Conversation',
+    description: 'Safely send or queue a message for another Antigravity conversation (across M5/M2). Auto-wakes only when the target tab opted into Auto-wake, is not working, passes cooldown/hop/idle checks, and otherwise queues cleanly for Mission Control approval.',
+    inputSchema: {
+      targetConversationId: z.string().optional(),
+      targetTitle: z.string().optional(),
+      host: z.string().optional(),
+      message: z.string().min(1).max(2000),
+      fromLabel: z.string().max(80).optional(),
+      hop: z.number().int().min(1).max(10).optional(),
+    },
+  },
+  async ({ targetConversationId, targetTitle, host, message, fromLabel, hop = 1 }) => {
+    const cleanMsg = String(message || '').trim();
+    const fromConversationId = String(process.env.ANTIGRAVITY_CONVERSATION_ID || '').trim();
+    const { selfName } = loadPeerConfig();
+    const resolvedFromTitle = fromLabel?.trim() || (fromConversationId ? getThreadDetail(fromConversationId)?.title : '') || '';
+    const senderTag = resolvedFromTitle ? `${resolvedFromTitle} (${selfName})` : `Antigravity Agent (${selfName})`;
+
+    const resolved = await resolveConversationByTitleOrId({ targetConversationId, targetTitle, host });
+    if (!resolved.ok) {
+      const body = { ok: false, error: resolved.error, ...(resolved.matches ? { matches: resolved.matches } : {}) };
+      return { content: [{ type: 'text', text: body.error }], structuredContent: body };
+    }
+
+    const { owner } = resolved;
+    const resolvedId = owner.detail?.id || owner.target?.id || targetConversationId || '';
+    if (!owner.isSelf && owner.peer) {
+      const res = await proxyPeerRequest(owner.peer, '/v1/relay', {
+        method: 'POST',
+        body: {
+          targetConversationId: resolvedId,
+          message: cleanMsg,
+          fromConversationId,
+          fromLabel: senderTag,
+          hop,
+        },
+        timeoutMs: 25000,
+      });
+      if (res.body?.relay && !res.body.relay.targetHost) {
+        res.body.relay.targetHost = owner.host;
+      }
+      const relay = res.body?.relay;
+      const summary = res.body?.ok
+        ? `Relay ${res.body.delivery} (${relay?.id?.slice(0, 8) || ''}) to ${relay?.targetTitle || resolvedId} [${owner.host}]: ${relay?.reason || ''}`
+        : (res.body?.error || 'Relay failed');
+      return { content: [{ type: 'text', text: summary }], structuredContent: res.body };
+    }
+
+    const detail = owner.detail || getThreadDetail(resolvedId);
+    const out = await submitLocalRelay({
+      detail: detail ? { ...detail, host: selfName } : null,
+      targetHost: selfName,
+      fromConversationId,
+      fromLabel: senderTag,
+      message: cleanMsg,
+      hop,
+      sendFn: sendMessageToThread,
+    });
+    const relay = out.body?.relay;
+    const summary = out.body?.ok
+      ? `Relay ${out.body.delivery} (${relay?.id?.slice(0, 8) || ''}) to ${relay?.targetTitle || resolvedId} [${selfName}]: ${relay?.reason || ''}`
+      : (out.body?.error || 'Relay failed');
+    return { content: [{ type: 'text', text: summary }], structuredContent: out.body };
+  },
+);
+
+server.registerTool(
+  'check_relay_status',
+  {
+    title: 'Check Agent Relay Status',
+    description: 'Inspect delivery status (pending, sent, dismissed) for agent relay messages across Macs.',
+    inputSchema: {
+      relayId: z.string().optional(),
+      targetConversationId: z.string().optional(),
+      limit: z.number().int().min(1).max(40).optional(),
+    },
+  },
+  async ({ relayId, targetConversationId, limit = 15 } = {}) => {
+    const snap = await getFederatedBoard({ includeFleet: false, includeHidden: false });
+    let relays = snap.relays || [];
+    if (relayId) relays = relays.filter((r) => r.id === relayId);
+    else if (targetConversationId) relays = relays.filter((r) => r.targetConversationId === targetConversationId);
+    relays = relays.slice(0, limit);
+    const text = relays
+      .map((r) => `[${r.status.toUpperCase()}] ${r.id.slice(0, 8)} ${r.fromLabel} -> ${r.targetTitle} (${r.targetHost}): ${r.reason}`)
+      .join('\n') || 'No matching relays.';
+    return { content: [{ type: 'text', text }], structuredContent: { ok: true, relays } };
+  },
+);
+
+server.registerTool(
+  'approve_relay',
+  {
+    title: 'Approve Pending Relay',
+    description: 'App-only human action to deliver a queued agent relay message (with optional text edits).',
+    inputSchema: {
+      relayId: z.string(),
+      host: z.string().optional(),
+      text: z.string().max(2000).optional(),
+    },
+    _meta: { ui: { visibility: ['app'] } },
+  },
+  async ({ relayId, host, text }) => {
+    const owner = await resolveRelayOwner(relayId, host);
+    if (!owner) {
+      const body = { ok: false, error: 'Relay not found' };
+      return { content: [{ type: 'text', text: body.error }], structuredContent: body };
+    }
+    if (!owner.isSelf && owner.peer) {
+      const res = await proxyPeerRequest(owner.peer, `/v1/relay/${encodeURIComponent(relayId)}/approve`, {
+        method: 'POST',
+        body: text?.trim() ? { text: text.trim() } : {},
+        timeoutMs: 25000,
+      });
+      return {
+        content: [{ type: 'text', text: res.body?.ok ? (res.body.message || 'Relay approved') : (res.body?.error || 'Approve failed') }],
+        structuredContent: res.body,
+      };
+    }
+    const out = await approveLocalRelay(relayId, {
+      editedMessage: text || '',
+      getDetailFn: getThreadDetail,
+      sendFn: sendMessageToThread,
+    });
+    return {
+      content: [{ type: 'text', text: out.body.ok ? out.body.message : (out.body.error || 'Approve failed') }],
+      structuredContent: out.body,
+    };
+  },
+);
+
+server.registerTool(
+  'dismiss_relay',
+  {
+    title: 'Dismiss Pending Relay',
+    description: 'App-only human action to dismiss a queued agent relay message.',
+    inputSchema: {
+      relayId: z.string(),
+      host: z.string().optional(),
+    },
+    _meta: { ui: { visibility: ['app'] } },
+  },
+  async ({ relayId, host }) => {
+    const owner = await resolveRelayOwner(relayId, host);
+    if (!owner) {
+      const body = { ok: false, error: 'Relay not found' };
+      return { content: [{ type: 'text', text: body.error }], structuredContent: body };
+    }
+    if (!owner.isSelf && owner.peer) {
+      const res = await proxyPeerRequest(owner.peer, `/v1/relay/${encodeURIComponent(relayId)}/dismiss`, {
+        method: 'POST',
+        body: {},
+        timeoutMs: 10000,
+      });
+      return {
+        content: [{ type: 'text', text: res.body?.ok ? (res.body.message || 'Dismissed relay') : (res.body?.error || 'Dismiss failed') }],
+        structuredContent: res.body,
+      };
+    }
+    const out = dismissLocalRelay(relayId);
+    return {
+      content: [{ type: 'text', text: out.body.ok ? out.body.message : (out.body.error || 'Dismiss failed') }],
+      structuredContent: out.body,
+    };
+  },
+);
+
+server.registerTool(
+  'toggle_auto_wake',
+  {
+    title: 'Toggle Auto-Wake on Conversation',
+    description: 'App-only human action to opt a conversation tab in or out of guarded agent Auto-wake.',
+    inputSchema: {
+      conversationId: z.string(),
+      host: z.string().optional(),
+      enabled: z.boolean().optional(),
+    },
+    _meta: { ui: { visibility: ['app'] } },
+  },
+  async ({ conversationId, host, enabled }) => {
+    const owner = await resolveOwnerPeer(conversationId, host);
+    if (!owner) {
+      const body = { ok: false, error: 'Conversation not found' };
+      return { content: [{ type: 'text', text: body.error }], structuredContent: body };
+    }
+    if (!owner.isSelf && owner.peer) {
+      const res = await proxyPeerRequest(owner.peer, `/v1/threads/${encodeURIComponent(conversationId)}/auto-wake`, {
+        method: 'POST',
+        body: typeof enabled === 'boolean' ? { enabled } : {},
+        timeoutMs: 10000,
+      });
+      return {
+        content: [{ type: 'text', text: res.body?.ok ? (res.body.message || 'Updated auto-wake') : (res.body?.error || 'Toggle failed') }],
+        structuredContent: res.body,
+      };
+    }
+    const detail = owner.detail || getThreadDetail(conversationId);
+    const autoWake = typeof enabled === 'boolean' ? setAutoWake(conversationId, enabled) : toggleAutoWake(conversationId);
+    const msg = `${autoWake ? 'Enabled' : 'Disabled'} auto-wake for ${detail?.title || conversationId}`;
+    return {
+      content: [{ type: 'text', text: msg }],
+      structuredContent: { ok: true, conversationId, autoWake, message: msg },
     };
   },
 );

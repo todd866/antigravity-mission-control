@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { attachBriefings } from './briefing.mjs';
+import { getAutoWakeSet, getLocalRelays } from './relay.mjs';
 
 const HOME = homedir();
 const AGY_DIR = join(HOME, '.gemini', 'antigravity');
@@ -605,6 +606,7 @@ function collectRawConversations(detailId = null) {
     });
   }
 
+  const autoWakeSet = getAutoWakeSet();
   const items = [];
   for (const row of topRows) {
     const id = row.conversation_id;
@@ -637,6 +639,7 @@ function collectRawConversations(detailId = null) {
       lastModifiedMs: statusInfo.lastModifiedMs,
       lastUserInputMs: statusInfo.lastUserInputMs,
       annPinned: ann.pinned,
+      autoWake: autoWakeSet.has(id),
       focus: transcript.focus,
       focusIsCurrentTurn,
       steps: transcript.steps,
@@ -761,6 +764,8 @@ export function getBoardSnapshot({ includeDetailId = null, includeFleet = true, 
   const rawItems = collectRawConversations(includeDetailId);
   const withBriefings = attachBriefings(rawItems);
   const unified = orderCombinedConversations(withBriefings, includeHidden);
+  const relays = getLocalRelays(40);
+  unified.counts.pendingRelays = relays.filter((r) => r.status === 'pending').length;
   const lastAction = readRecentLastAction();
 
   return {
@@ -769,6 +774,7 @@ export function getBoardSnapshot({ includeDetailId = null, includeFleet = true, 
     counts: unified.counts,
     conversations: unified.conversations,
     fleet: includeFleet ? fleetCache.items : [],
+    relays,
     ...(lastAction ? { lastAction } : {}),
   };
 }
@@ -824,6 +830,7 @@ export function getConversationDigest(conversationId) {
     title,
     projectName: projects[projectId] || projectId,
     state: statusInfo.state,
+    autoWake: isAutoWakeEnabled(safeId),
     stepCount: Number(row.step_count || 0),
     lastUserInputMs: statusInfo.lastUserInputMs,
     waitingReason: statusInfo.waitingReason,

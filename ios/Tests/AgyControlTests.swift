@@ -170,4 +170,66 @@ final class AgyControlTests: XCTestCase {
         XCTAssertEqual(decoded.conversations[1].briefing?.suggestions.first?.label, "Run test suite")
         XCTAssertEqual(decoded.macAccessibility, false)
     }
+
+    func testRelayAndAutoWakeDecoding() throws {
+        let json = """
+        {
+          "generatedAt": 1795480000000,
+          "sortMode": "fixed",
+          "counts": { "total": 1, "attention": 0, "working": 0, "bg": 0, "unread": 0, "idle": 1, "hidden": 0, "pendingRelays": 1 },
+          "conversations": [
+            {
+              "id": "33333333-3333-3333-3333-333333333333",
+              "shortId": "33333333",
+              "title": "Worker Tab",
+              "host": "m2",
+              "projectId": "p1",
+              "projectName": "App",
+              "stepCount": 4,
+              "state": "idle",
+              "waitingReason": "",
+              "unread": false,
+              "stalled": false,
+              "ageMs": 5000,
+              "lastModifiedMs": 1795479995000,
+              "lastUserInputMs": 1795479990000,
+              "autoWake": true,
+              "focus": "",
+              "steps": null,
+              "lastReply": "Ready",
+              "runningBgCount": 0,
+              "subagentCount": 0,
+              "subagents": [],
+              "model": "",
+              "pinned": false,
+              "hidden": false,
+              "slot": 1
+            }
+          ],
+          "fleet": [],
+          "relays": [
+            {
+              "id": "44444444-4444-4444-4444-444444444444",
+              "fromLabel": "Coordinator (m5)",
+              "targetConversationId": "33333333-3333-3333-3333-333333333333",
+              "targetTitle": "Worker Tab",
+              "targetHost": "m2",
+              "message": "Run final checks and report back.",
+              "hop": 1,
+              "status": "pending",
+              "reason": "Approval required (auto-wake off)",
+              "createdAt": 1795479998000,
+              "error": ""
+            }
+          ]
+        }
+        """
+        let decoded = try JSONDecoder().decode(BoardResponse.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.counts.pendingRelays, 1)
+        XCTAssertEqual(decoded.conversations.first?.autoWake, true)
+        XCTAssertEqual(decoded.relays?.count, 1)
+        XCTAssertEqual(decoded.relays?.first?.fromLabel, "Coordinator (m5)")
+        XCTAssertEqual(decoded.relays?.first?.targetHost, "m2")
+        XCTAssertEqual(decoded.relays?.first?.status, "pending")
+    }
 }
