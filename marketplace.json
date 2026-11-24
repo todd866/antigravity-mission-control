@@ -1,0 +1,15 @@
+{
+  "name": "todd866-plugins",
+  "plugins": [
+    {
+      "name": "mission-control",
+      "version": "1.2.0",
+      "description": "Pictorial instrument cockpit, turn-aware AI briefings, adaptive AI Commander, and multi-Mac federation for Antigravity.",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/todd866/antigravity-mission-control/releases/download/v1.2.0/mission-control-plugin-v1.2.0.zip",
+        "sha256": "204cf30c8a5bea9981d10e88029b18c90e9bee5665de746f25daad09e319ebdd"
+      }
+    }
+  ]
+}

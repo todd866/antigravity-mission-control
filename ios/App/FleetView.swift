@@ -7,7 +7,7 @@ struct FleetView: View {
         NavigationStack {
             List {
                 Section("Mac Companion") {
-                    LabeledContent("Host", value: model.board?.host ?? "m5")
+                    LabeledContent("Host", value: model.board?.host ?? "primary")
                     LabeledContent("Server") {
                         Text(model.serverURL.isEmpty ? "Not set" : model.serverURL)
                             .font(.caption)

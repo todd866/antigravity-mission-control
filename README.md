@@ -52,7 +52,19 @@ A pictorial instrument cockpit, turn-aware AI project monitor, adaptive **AI Com
 **From a Release archive** (zero `npm install` required — bundles `dist/server.mjs` and `dist/app.html`):
 
 ```bash
-agy plugin install https://github.com/todd866/antigravity-mission-control/releases/latest/download/mission-control-plugin-v1.2.0.zip
+agy plugin install https://github.com/todd866/antigravity-mission-control/releases/download/v1.2.0/mission-control-plugin-v1.2.0.zip
+```
+
+**Via Homebrew** (installs CLI cockpit tools `agy-status` / `agy-relay` and plugin installer):
+
+```bash
+brew install todd866/tap/antigravity-mission-control
+```
+
+**Via Self-Hosted Marketplace Catalog** (`marketplace.json`):
+
+```
+https://github.com/todd866/antigravity-mission-control/releases/download/v1.2.0/marketplace.json
 ```
 
 **Or from source:**
@@ -66,12 +78,12 @@ cd antigravity-mission-control
 Reload MCP servers in Antigravity and open **Mission Control** from the global sidebar or the side-pane **`+`** menu.
 
 <details>
-<summary>Optional: Package a standalone zip &amp; self-hosted marketplace manifest</summary>
+<summary>Optional: Package standalone plugin .zip, .mcpb bundle, and manifests</summary>
 
 ```bash
 ./scripts/package-plugin.sh
-# Produces dist/mission-control-plugin-v1.2.0.zip + dist/marketplace.json
-# Validates both plugin/ and the zip archive via `agy plugin validate --strict`
+# Produces dist/mission-control-plugin-v1.2.0.zip, dist/mission-control-v1.2.0.mcpb,
+# and updates marketplace.json + server.json with exact SHA-256 digests.
 ```
 
 </details>

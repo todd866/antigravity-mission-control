@@ -248,7 +248,7 @@ const PHASE_ICON: Record<PhaseKind, string> = {
   build: '<svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10.4 3.2a3.2 3.2 0 0 0-3.8 4.4L3 11.2 4.8 13l3.6-3.6a3.2 3.2 0 0 0 4.4-3.8l-1.9 1.9-1.5-1.5 1.9-1.8Z" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/></svg>',
   test: '<svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 2.5h4M7 2.5v3.6L3.6 12a1.2 1.2 0 0 0 1 1.8h6.8a1.2 1.2 0 0 0 1-1.8L9 6.1V2.5" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   debug: '<svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8.5" r="4" stroke="currentColor" stroke-width="1.35"/><path d="M8 2.5v2M3 6l2 1M13 6l-2 1M2.5 10h2M11.5 10h2M8 6.5v4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
-  review: '<svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M1.8 8s2.4-4 6.2-4 6.2 4 6.2 4-2.4 4-6.2 4S1.8 8 1.8 8Z" stroke="currentColor" stroke-width="1.35"/><circle cx="8" cy="8" r="1.8" fill="currentColor"/></svg>',
+  review: '<svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M 1.8 8s2.4-4 6.2-4 6.2 4 6.2 4-2.4 4-6.2 4S1.8 8 1.8 8Z" stroke="currentColor" stroke-width="1.35"/><circle cx="8" cy="8" r="1.8" fill="currentColor"/></svg>',
   deploy: '<svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2.2c2.4 1.6 3.5 4.1 3.5 7l-3.5 2-3.5-2c0-2.9 1.1-5.4 3.5-7Z" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"/><path d="M6 12.2 5 14M10 12.2l1 1.8" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/></svg>',
   research: '<svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="4.2" stroke="currentColor" stroke-width="1.4"/><path d="M10.2 10.2 13.5 13.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   wait: '<svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.35"/><path d="M8 5v3.3l2.2 1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
@@ -256,7 +256,7 @@ const PHASE_ICON: Record<PhaseKind, string> = {
 };
 
 const ICON_PIN =
-  '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M5.5 2.5h5l-.6 4.2 2.1 2.1v1.2H8.7v3.5l-.7.8-.7-.8V10H4V8.8l2.1-2.1-.6-4.2Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="currentColor" fill-opacity="var(--pin-fill, 0)"/></svg>';
+  '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M 5.5 2.5h5l-.6 4.2 2.1 2.1v1.2H8.7v3.5l-.7.8-.7-.8V10H4V8.8l2.1-2.1-.6-4.2Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="currentColor" fill-opacity="var(--pin-fill, 0)"/></svg>';
 const ICON_BOTTOM =
   '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 2.5v7.5M4.8 7.2 8 10.4l3.2-3.2M3.5 13h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const ICON_TOP =

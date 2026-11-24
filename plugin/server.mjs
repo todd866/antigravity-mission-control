@@ -473,7 +473,7 @@ server.registerTool(
   'relay_to_conversation',
   {
     title: 'Relay Message to Another Conversation',
-    description: 'Safely send or queue a message for another Antigravity conversation (across M5/M2). Auto-wakes only when the target tab opted into Auto-wake, is not working, passes cooldown/hop/idle checks, and otherwise queues cleanly for Mission Control approval.',
+    description: 'Safely send or queue a message for another Antigravity conversation across connected Macs. Auto-wakes only when the target tab opted into Auto-wake, is not working, passes cooldown/hop/idle checks, and otherwise queues cleanly for Mission Control approval.',
     inputSchema: {
       targetConversationId: z.string().optional(),
       targetTitle: z.string().optional(),

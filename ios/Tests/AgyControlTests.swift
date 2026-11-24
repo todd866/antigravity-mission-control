@@ -3,21 +3,24 @@ import XCTest
 
 final class AgyControlTests: XCTestCase {
     func testPairingLinkParsesValidHTTPS() throws {
-        let link = try PairingLink.parse("agycontrol://pair?url=https%3A%2F%2Fmac.example.ts.net%3A8446&fallback=https%3A%2F%2Fbackup.example.ts.net%3A8446&token=0123456789abcdef0123456789abcdef")
+        let tok32 = String(repeating: "a1b2", count: 8)
+        let link = try PairingLink.parse("agycontrol://pair?url=https%3A%2F%2Fmac.example.ts.net%3A8446&fallback=https%3A%2F%2Fbackup.example.ts.net%3A8446&token=\(tok32)")
         XCTAssertEqual(link.serverURL, "https://mac.example.ts.net:8446")
         XCTAssertEqual(link.fallbackServerURL, "https://backup.example.ts.net:8446")
-        XCTAssertEqual(link.token, "0123456789abcdef0123456789abcdef")
+        XCTAssertEqual(link.token, tok32)
     }
 
     func testPairingLinkAllowsLocalhostHTTP() throws {
-        let link = try PairingLink.parse("agycontrol://pair?url=http%3A%2F%2F127.0.0.1%3A8696&token=0123456789abcdef")
+        let tok16 = String(repeating: "a1b2", count: 4)
+        let link = try PairingLink.parse("agycontrol://pair?url=http%3A%2F%2F127.0.0.1%3A8696&token=\(tok16)")
         XCTAssertEqual(link.serverURL, "http://127.0.0.1:8696")
         XCTAssertNil(link.fallbackServerURL)
     }
 
     func testPairingLinkRejectsNonLocalHTTPAndShortToken() {
-        XCTAssertThrowsError(try PairingLink.parse("agycontrol://pair?url=http%3A%2F%2Fexample.com%3A8446&token=0123456789abcdef"))
-        XCTAssertThrowsError(try PairingLink.parse("agycontrol://pair?url=https%3A%2F%2Fmac.example.ts.net%3A8446&fallback=http%3A%2F%2Fexample.com%3A8446&token=0123456789abcdef"))
+        let tok16 = String(repeating: "a1b2", count: 4)
+        XCTAssertThrowsError(try PairingLink.parse("agycontrol://pair?url=http%3A%2F%2Fexample.com%3A8446&token=\(tok16)"))
+        XCTAssertThrowsError(try PairingLink.parse("agycontrol://pair?url=https%3A%2F%2Fmac.example.ts.net%3A8446&fallback=http%3A%2F%2Fexample.com%3A8446&token=\(tok16)"))
         XCTAssertThrowsError(try PairingLink.parse("agycontrol://pair?url=https%3A%2F%2Fexample.com%3A8446&token=short"))
     }
 
@@ -39,7 +42,7 @@ final class AgyControlTests: XCTestCase {
     }
 
     func testMarkdownSanitizerStripsFileLinksAndHeadings() {
-        let raw = "### Overall verdict\n\nManuscript [paper.tex](file:///Users/dev/work/paper.tex) is ready.\n\n---\n\n- Check `/Users/dev/work/notes.txt` builds."
+        let raw = "### Overall verdict\n\nManuscript [paper.tex](file:///Users/agentkit-dev/work/paper.tex) is ready.\n\n---\n\n- Check `/Users/agentkit-dev/work/notes.txt` builds."
         let rendered = cleanMarkdownPlainText(raw)
         XCTAssertFalse(rendered.contains("file:///"))
         XCTAssertFalse(rendered.contains("/Users/"))
@@ -59,7 +62,7 @@ final class AgyControlTests: XCTestCase {
               "id": "11111111-1111-1111-1111-111111111111",
               "shortId": "11111111",
               "title": "Demo Paper",
-              "host": "m5",
+              "host": "studio",
               "projectId": "p1",
               "projectName": "Research",
               "stepCount": 42,
@@ -104,7 +107,7 @@ final class AgyControlTests: XCTestCase {
               "id": "22222222-2222-2222-2222-222222222222",
               "shortId": "22222222",
               "title": "Idle Feature",
-              "host": "m2",
+              "host": "laptop",
               "projectId": "p1",
               "projectName": "App",
               "stepCount": 10,
@@ -144,12 +147,12 @@ final class AgyControlTests: XCTestCase {
           ],
           "fleet": [],
           "projects": [
-            { "id": "p1", "name": "Projects", "host": "m5" },
-            { "id": "p1", "name": "Projects", "host": "m2" }
+            { "id": "p1", "name": "Projects", "host": "studio" },
+            { "id": "p1", "name": "Projects", "host": "laptop" }
           ],
           "hosts": [
-            { "name": "m5", "isSelf": true, "online": true, "macAccessibility": false, "conversationCount": 1 },
-            { "name": "m2", "isSelf": false, "online": true, "macAccessibility": true, "conversationCount": 1 }
+            { "name": "studio", "isSelf": true, "online": true, "macAccessibility": false, "conversationCount": 1 },
+            { "name": "laptop", "isSelf": false, "online": true, "macAccessibility": true, "conversationCount": 1 }
           ],
           "host": "macbook",
           "macAccessibility": false,
@@ -161,9 +164,9 @@ final class AgyControlTests: XCTestCase {
         XCTAssertEqual(decoded.counts.idle, 1)
         XCTAssertEqual(decoded.hosts?.count, 2)
         XCTAssertEqual(decoded.projects?.count, 2)
-        XCTAssertEqual(decoded.projects?[1].host, "m2")
-        XCTAssertEqual(decoded.conversations[0].host, "m5")
-        XCTAssertEqual(decoded.conversations[1].host, "m2")
+        XCTAssertEqual(decoded.projects?[1].host, "laptop")
+        XCTAssertEqual(decoded.conversations[0].host, "studio")
+        XCTAssertEqual(decoded.conversations[1].host, "laptop")
         XCTAssertEqual(decoded.conversations[0].focusIsCurrentTurn, false)
         XCTAssertEqual(decoded.conversations[0].summaryLine, "Running follow-up edits after draft review")
         XCTAssertEqual(decoded.conversations[1].briefing?.suggestions.count, 2)
@@ -182,7 +185,7 @@ final class AgyControlTests: XCTestCase {
               "id": "33333333-3333-3333-3333-333333333333",
               "shortId": "33333333",
               "title": "Worker Tab",
-              "host": "m2",
+              "host": "laptop",
               "projectId": "p1",
               "projectName": "App",
               "stepCount": 4,
@@ -210,10 +213,10 @@ final class AgyControlTests: XCTestCase {
           "relays": [
             {
               "id": "44444444-4444-4444-4444-444444444444",
-              "fromLabel": "Coordinator (m5)",
+              "fromLabel": "Coordinator (studio)",
               "targetConversationId": "33333333-3333-3333-3333-333333333333",
               "targetTitle": "Worker Tab",
-              "targetHost": "m2",
+              "targetHost": "laptop",
               "message": "Run final checks and report back.",
               "hop": 1,
               "status": "pending",
@@ -228,8 +231,8 @@ final class AgyControlTests: XCTestCase {
         XCTAssertEqual(decoded.counts.pendingRelays, 1)
         XCTAssertEqual(decoded.conversations.first?.autoWake, true)
         XCTAssertEqual(decoded.relays?.count, 1)
-        XCTAssertEqual(decoded.relays?.first?.fromLabel, "Coordinator (m5)")
-        XCTAssertEqual(decoded.relays?.first?.targetHost, "m2")
+        XCTAssertEqual(decoded.relays?.first?.fromLabel, "Coordinator (studio)")
+        XCTAssertEqual(decoded.relays?.first?.targetHost, "laptop")
         XCTAssertEqual(decoded.relays?.first?.status, "pending")
     }
 }
