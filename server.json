@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.todd866/antigravity-mission-control",
   "title": "Mission Control for Antigravity",
-  "description": "Pictorial instrument cockpit, turn-aware AI briefings, adaptive AI Commander, and multi-Mac federation for Antigravity.",
+  "description": "Pictorial MCP cockpit, AI briefings, adaptive Commander, and multi-Mac relay for Antigravity.",
   "version": "1.2.0",
   "repository": {
     "url": "https://github.com/todd866/antigravity-mission-control",
